@@ -7,12 +7,13 @@ import (
 )
 
 const (
-	maxStreamBuf   = 2 << 20 // 2 MiB per stream before resetting
-	damageLRUSlots = 16384
+	maxStreamBuf   = 2 << 20 // 2 MiB por stream antes de reiniciar el buffer
+	damageLRUSlots = 16384   // entradas del caché de daños ya vistos
 )
 
-// Parser turns a server->client byte stream into combat events. It keeps one
-// reassembly buffer per TCP stream and feeds a shared Combat model.
+// Parser convierte un stream de bytes servidor->cliente en eventos de combate.
+// Mantiene un buffer de reensamblado por cada stream TCP y alimenta un modelo
+// Combat compartido.
 type Parser struct {
 	combat *Combat
 
@@ -20,12 +21,14 @@ type Parser struct {
 	bufs map[int64][]byte
 	now  time.Time
 
+	// seenDamage/seenOrder forman un caché LRU de claves de daño ya procesadas
+	// para no contar dos veces el mismo registro (ver parseEmbeddedDamage).
 	seenDamage map[string]struct{}
 	seenOrder  []string
 	seenNext   int
 }
 
-// NewParser returns a parser writing into combat.
+// NewParser devuelve un parser que escribe en combat.
 func NewParser(combat *Combat) *Parser {
 	return &Parser{
 		combat:     combat,
@@ -35,8 +38,12 @@ func NewParser(combat *Combat) *Parser {
 	}
 }
 
-// Feed appends freshly reassembled bytes for one stream and parses as many
-// complete frames as possible. ts is the capture time of the data.
+// Feed añade bytes recién reensamblados de un stream y parsea tantos frames
+// completos como sea posible. ts es el momento de captura de esos datos.
+//
+// Los bytes sobrantes (frame incompleto) se conservan en el buffer del stream
+// para la siguiente llamada, de modo que un frame partido entre dos paquetes se
+// reconstruye correctamente.
 func (p *Parser) Feed(streamID int64, data []byte, ts time.Time) {
 	if len(data) == 0 {
 		return
@@ -46,7 +53,7 @@ func (p *Parser) Feed(streamID int64, data []byte, ts time.Time) {
 
 	buf := append(p.bufs[streamID], data...)
 	if len(buf) > maxStreamBuf {
-		buf = buf[:0]
+		buf = buf[:0] // protección contra un stream que nunca se sincroniza
 	}
 	for len(buf) > 0 {
 		consumed := p.consume(buf, ts)
@@ -58,13 +65,16 @@ func (p *Parser) Feed(streamID int64, data []byte, ts time.Time) {
 	p.bufs[streamID] = buf
 }
 
-// ConsumeStream parses one buffer in place (used by tests and replay).
+// ConsumeStream parsea un buffer en el sitio (lo usan los tests y el replay).
+// Devuelve los bytes consumidos.
 func (p *Parser) ConsumeStream(buf []byte, ts time.Time) int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.consume(buf, ts)
 }
 
+// consume procesa un buffer: delimita los frames, resuelve los bundles, parsea
+// cada paquete y después escanea las regiones en busca de registros embebidos.
 func (p *Parser) consume(buf []byte, ts time.Time) int {
 	p.now = ts
 	frames, consumed := walk(buf)
@@ -80,18 +90,18 @@ func (p *Parser) consume(buf []byte, ts time.Time) int {
 	return consumed
 }
 
-// scanRegion runs the pattern scanners (identity, roster) over byte regions,
-// and also opens bundle payloads embedded inside packets (spec §6.2), where
-// copies of the identity and the party roster travel.
+// scanRegion ejecuta los escáneres de patrones (identidad, roster) sobre las
+// regiones de bytes, y además abre los bundles embebidos dentro de paquetes
+// (spec §6.2), por donde viajan copias de la identidad y del roster del grupo.
 func (p *Parser) scanRegion(b []byte, regs [][2]int) {
 	p.scanIdentity(b, regs)
 	p.scanRoster(b, regs)
 	p.scanEmbeddedBundles(b, regs, 1)
 }
 
-// scanEmbeddedBundles finds FF FF bundle payloads inside packets whose leading
-// length varint ends exactly where the bundle begins, decompresses them and
-// applies only the identity and roster scanners.
+// scanEmbeddedBundles busca payloads de bundle (FF FF) dentro de paquetes cuya
+// longitud inicial termina justo donde empieza el bundle, los descomprime y
+// aplica solo los escáneres de identidad y de roster.
 func (p *Parser) scanEmbeddedBundles(b []byte, regs [][2]int, depth int) {
 	if depth > maxBundleDepth {
 		return
@@ -109,8 +119,12 @@ func (p *Parser) scanEmbeddedBundles(b []byte, regs [][2]int, depth int) {
 	}
 }
 
-// tryEmbeddedBundle attempts to decode one embedded bundle starting at i (the
-// FF FF magic). It returns true when a bundle was successfully processed.
+// tryEmbeddedBundle intenta decodificar un bundle embebido que empieza en i (la
+// magia FF FF). Devuelve true cuando el bundle se procesó correctamente.
+//
+// Un bundle embebido no está en un límite de frame, así que su longitud se
+// localiza probando las tres anchuras posibles del varint que lo precede (1, 2 o
+// 3 bytes) y quedándose con la que produce un final coherente.
 func (p *Parser) tryEmbeddedBundle(b []byte, i, depth int) bool {
 	for n := 3; n >= 1; n-- {
 		at := i - n
@@ -139,6 +153,9 @@ func (p *Parser) tryEmbeddedBundle(b []byte, i, depth int) bool {
 	return false
 }
 
+// unwrapBundle descomprime el payload de un bundle y procesa recursivamente su
+// contenido: los paquetes normales van a parsePacket y las regiones resultantes
+// a scanRegion, con el mismo tratamiento que el nivel exterior.
 func (p *Parser) unwrapBundle(payload []byte, depth int, ts time.Time) {
 	if depth > maxBundleDepth {
 		return
@@ -158,8 +175,8 @@ func (p *Parser) unwrapBundle(payload []byte, depth int, ts time.Time) {
 	p.scanRegion(data, regions(frames, len(data)))
 }
 
-// parsePacket runs every parser over one frame; each ignores what is not its
-// own opcode.
+// parsePacket pasa cada parser sobre un frame; cada uno ignora lo que no sea su
+// propio opcode. El opcode son los dos bytes que siguen al varint de longitud.
 func (p *Parser) parsePacket(pkt []byte, ts time.Time) {
 	_, n := readVarint(pkt, 0)
 	if n <= 0 || n+1 >= len(pkt) {
@@ -167,27 +184,28 @@ func (p *Parser) parsePacket(pkt []byte, ts time.Time) {
 	}
 	op := [2]byte{pkt[n], pkt[n+1]}
 	switch op {
-	case [2]byte{0x04, 0x38}:
+	case [2]byte{0x04, 0x38}: // daño / curación
 		p.parseDamage(pkt, enableEmbeddedDamage, false)
 	case opIdentitySelf:
 		p.parseIdentityAt(pkt, n, true)
 	case opIdentityOther:
 		p.parseIdentityAt(pkt, n, false)
-	case [2]byte{0x41, 0x36}: // summon / mob spawn
+	case [2]byte{0x41, 0x36}: // aparición de summon / mob
 		p.parseSummonSpawn(pkt, ts)
-	case [2]byte{0x4A, 0x36}: // local player stats: identifies self
+	case [2]byte{0x4A, 0x36}: // stats del jugador local: identifica a self
 		p.parseSelfStats(pkt)
-	case [2]byte{0x23, 0x36}: // teleport of entity 0 = zone change
+	case [2]byte{0x23, 0x36}: // teletransporte de la entidad 0 = cambio de zona
 		p.parseZoneChange(pkt)
-	case [2]byte{0x13, 0x92}: // left the party
+	case [2]byte{0x13, 0x92}: // salida del grupo
 		p.parseGroupExit(pkt, 0x13, 0x92)
-	case [2]byte{0x1D, 0x97}: // left the raid
+	case [2]byte{0x1D, 0x97}: // salida de la raid
 		p.parseGroupExit(pkt, 0x1D, 0x97)
 	}
 }
 
-// parseSelfStats handles 4A 36 <id> (§8.8): the local player's stats, which
-// identify the entity id of our own character even without a 33 36 identity.
+// parseSelfStats maneja 4A 36 <id> (§8.8): las stats del jugador local, que
+// permiten identificar el id de nuestra propia entidad incluso sin haber visto
+// un registro de identidad 33 36.
 func (p *Parser) parseSelfStats(pkt []byte) {
 	_, n := readVarint(pkt, 0)
 	if n <= 0 || n+1 >= len(pkt) || pkt[n] != 0x4A || pkt[n+1] != 0x36 {
@@ -201,8 +219,8 @@ func (p *Parser) parseSelfStats(pkt []byte) {
 	p.combat.SetSelfID(id)
 }
 
-// parseZoneChange handles 23 36 00 (§8.8): teleport of the local player to
-// entity 0, i.e. a zone load. The current encounter is discarded.
+// parseZoneChange maneja 23 36 00 (§8.8): el teletransporte del jugador local a
+// la entidad 0, es decir, una carga de zona. Descarta el encuentro actual.
 func (p *Parser) parseZoneChange(pkt []byte) {
 	_, n := readVarint(pkt, 0)
 	if n <= 0 || n+1 >= len(pkt) || pkt[n] != 0x23 || pkt[n+1] != 0x36 {
@@ -214,7 +232,8 @@ func (p *Parser) parseZoneChange(pkt []byte) {
 	}
 }
 
-// parseGroupExit handles the exact frames 13 92 00 00 / 1D 97 00 00 (§8.8).
+// parseGroupExit maneja los frames exactos 13 92 00 00 / 1D 97 00 00 (§8.8), que
+// indican que el jugador local ha salido del grupo o de la raid.
 func (p *Parser) parseGroupExit(pkt []byte, a, b byte) {
 	_, n := readVarint(pkt, 0)
 	if n <= 0 || n+4 > len(pkt) {
@@ -225,11 +244,14 @@ func (p *Parser) parseGroupExit(pkt []byte, a, b byte) {
 	}
 }
 
+// damageSeen indica si una clave de daño ya se procesó.
 func (p *Parser) damageSeen(key string) bool {
 	_, ok := p.seenDamage[key]
 	return ok
 }
 
+// markDamageSeen registra una clave de daño en el caché LRU, desalojando la
+// entrada más antigua al llegar al límite de slots.
 func (p *Parser) markDamageSeen(key string) {
 	if _, ok := p.seenDamage[key]; ok {
 		return
@@ -242,8 +264,8 @@ func (p *Parser) markDamageSeen(key string) {
 	p.seenNext = (p.seenNext + 1) % damageLRUSlots
 }
 
-// parseSummonSpawn handles 41 36 spawns (§8.1): it flags the entity as an NPC
-// and, for summons, tries to resolve its owner.
+// parseSummonSpawn maneja las apariciones 41 36 (§8.1): marca la entidad como
+// NPC y, en el caso de los summons, intenta resolver su dueño.
 func (p *Parser) parseSummonSpawn(pkt []byte, ts time.Time) {
 	_, n := readVarint(pkt, 0)
 	if n <= 0 || n+3 >= len(pkt) {
@@ -266,6 +288,8 @@ func (p *Parser) parseSummonSpawn(pkt []byte, ts time.Time) {
 	mask := binary.LittleEndian.Uint32(pkt[o:])
 	kind := byte(mask & 0xFF)
 
+	// El nombre, si lo hay, va embebido tras una cabecera; se prueba en las dos
+	// posiciones donde el patrón lo coloca habitualmente.
 	for _, pos := range []int{o + 4, o + 2} {
 		if pos+1 < len(pkt) && pkt[pos]&1 != 0 {
 			ln := int(pkt[pos+1])
@@ -284,7 +308,9 @@ func (p *Parser) parseSummonSpawn(pkt []byte, ts time.Time) {
 	p.combat.MarkNPC(id, owner)
 }
 
-// summonOwner resolves the owner of a summon using the known patterns (§8.1).
+// summonOwner resuelve el dueño de un summon usando los patrones conocidos
+// (§8.1): busca una firma fija de 8 bytes y lee el varint del id del dueño que
+// la sigue.
 func (p *Parser) summonOwner(pkt []byte, maskOff, id int) int {
 	magic := []byte{0x80, 0x75, 0xD5, 0x2A, 0xBB, 0x03, 0x00, 0x00}
 	end := min(maskOff+240, len(pkt))
@@ -300,8 +326,8 @@ func (p *Parser) summonOwner(pkt []byte, maskOff, id int) int {
 	return 0
 }
 
-// plausibleID reports whether id looks like an entity id: 100..9_999_999, or
-// below 100 only if a spawn/identity already announced it.
+// plausibleID indica si id parece un id de entidad válido: entre 100 y
+// 9_999_999, o por debajo de 100 solo si un spawn/identidad ya lo anunció.
 func (p *Parser) plausibleID(id int) bool {
 	if id >= 100 && id <= 9_999_999 {
 		return true
@@ -312,6 +338,7 @@ func (p *Parser) plausibleID(id int) bool {
 	return p.combat.hasID(id)
 }
 
+// matchAt comprueba si el patrón pat aparece exactamente en b[at:].
 func matchAt(b []byte, at int, pat []byte) bool {
 	if at+len(pat) > len(b) {
 		return false

@@ -1,6 +1,6 @@
-// Command replay feeds a sniffer capture log through the aion2 parser and
-// prints the resolved entities and the DPS board. It lets the protocol layer be
-// developed and verified without the game or Npcap running.
+// Command replay pasa un log de captura del sniffer por el parser de aion2 e
+// imprime las entidades resueltas y la tabla de DPS. Permite desarrollar y
+// verificar la capa de protocolo sin el juego ni Npcap en marcha.
 //
 //	go run ./tools/replay captures/session-20261016-215243.txt
 package main
@@ -18,6 +18,9 @@ import (
 	"daeva-meter/aion2"
 )
 
+// lineRe reconoce cada línea del log de sesión escrita por app.writePayload:
+//
+//	+<segundos> <S2C|C2S> stream=<id> len=<n> <hex>
 var lineRe = regexp.MustCompile(`^\+([0-9.]+) (S2C|C2S) stream=(\d+) len=(\d+) ([0-9a-f]+)$`)
 
 func main() {
@@ -36,6 +39,7 @@ func main() {
 
 	combat := aion2.NewCombat()
 	parser := aion2.NewParser(combat)
+	// Los tiempos del log son relativos, así que se usa una base fija.
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	var maxSec float64
@@ -53,7 +57,7 @@ func main() {
 			maxSec = sec
 		}
 		if m[2] != "S2C" {
-			continue
+			continue // solo interesa el sentido servidor->cliente
 		}
 		stream, _ := strconv.ParseInt(m[3], 10, 64)
 		data, err := hex.DecodeString(m[5])

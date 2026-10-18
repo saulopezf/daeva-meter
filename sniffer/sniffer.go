@@ -14,21 +14,24 @@ import (
 	"github.com/google/gopacket/tcpassembly"
 )
 
-// DefaultPort is the TCP port Aion 2 clients talk to their server on.
+// DefaultPort es el puerto TCP por el que los clientes de Aion 2 hablan con su
+// servidor.
 const DefaultPort uint16 = 13328
 
-// Direction of a reassembled TCP payload relative to the game server.
+// Direction es el sentido de un payload TCP reensamblado respecto al servidor
+// del juego.
 type Direction uint8
 
 const (
-	// UnknownDir is set when neither side of the flow uses DefaultPort.
+	// UnknownDir se usa cuando ningún extremo del flujo emplea DefaultPort.
 	UnknownDir Direction = iota
-	// ClientToServer is traffic towards the game server port.
+	// ClientToServer es el tráfico hacia el puerto del servidor del juego.
 	ClientToServer
-	// ServerToClient is traffic originating from the game server port.
+	// ServerToClient es el tráfico que sale del puerto del servidor del juego.
 	ServerToClient
 )
 
+// String devuelve la etiqueta corta de la dirección usada en los logs.
 func (d Direction) String() string {
 	switch d {
 	case ClientToServer:
@@ -41,13 +44,14 @@ func (d Direction) String() string {
 }
 
 const (
-	snapLen     = 262144
-	readTimeout = 500 * time.Millisecond
-	previewLen  = 64
-	tickEvery   = 250 * time.Millisecond
+	snapLen     = 262144                 // bytes capturados por paquete
+	readTimeout = 500 * time.Millisecond // tiempo de espera de lectura de pcap
+	previewLen  = 64                     // bytes mostrados en la vista previa
+	tickEvery   = 250 * time.Millisecond // cadencia del bucle de estadísticas
 )
 
-// Stats is a snapshot of capture counters, JSON-encoded for the frontend.
+// Stats es una instantánea de los contadores de captura, codificada en JSON para
+// el frontend.
 type Stats struct {
 	Devices       int     `json:"devices"`
 	Packets       int64   `json:"packets"`
@@ -60,21 +64,23 @@ type Stats struct {
 	TrafficSeen   bool    `json:"trafficSeen"`
 }
 
-// Options configures a Sniffer.
+// Options configura un Sniffer.
 type Options struct {
-	Port    uint16       // TCP port to filter on, DefaultPort if 0
-	Console bool         // print a 1s summary line to stdout
-	OnStats func(Stats)  // called every tick with fresh rates
-	OnLog   func(string) // called for every log line (console lines included)
-	// OnPayload is called for every reassembled payload chunk with the
-	// chunk direction relative to the game server port. The byte slice is
-	// only valid for the duration of the call.
+	Port    uint16       // puerto TCP a filtrar; DefaultPort si es 0
+	Console bool         // imprime una línea de resumen por segundo en stdout
+	OnStats func(Stats)  // se llama en cada tick con las tasas actuales
+	OnLog   func(string) // se llama por cada línea de log (incluidas las de consola)
+	// OnPayload se llama por cada fragmento de payload reensamblado, con el
+	// sentido del fragmento respecto al puerto del servidor. El slice de bytes
+	// solo es válido durante la llamada.
 	OnPayload func(streamID int64, dir Direction, ts time.Time, b []byte)
 }
 
-// Sniffer passively captures TCP traffic on Options.Port from every device
-// Npcap can open, reassembles the streams and reports counters/logs.
-// One Sniffer instance is single-use: create a new one for every Start.
+// Sniffer captura de forma pasiva el tráfico TCP del puerto Options.Port en
+// todos los dispositivos que Npcap pueda abrir, reensambla los streams y reporta
+// contadores y logs.
+//
+// Una instancia de Sniffer es de un solo uso: crea una nueva por cada Start.
 type Sniffer struct {
 	opts Options
 
@@ -96,7 +102,7 @@ type Sniffer struct {
 	devices int
 }
 
-// New builds a stopped sniffer for the given options.
+// New construye un sniffer detenido con las opciones dadas.
 func New(opts Options) *Sniffer {
 	if opts.Port == 0 {
 		opts.Port = DefaultPort
@@ -104,8 +110,13 @@ func New(opts Options) *Sniffer {
 	return &Sniffer{opts: opts}
 }
 
-// Start opens capture handles on every available device and launches the
-// read/stats goroutines. It is safe to call Stop concurrently afterwards.
+// Start abre handles de captura en todos los dispositivos disponibles y lanza
+// los goroutines de lectura y de estadísticas. Después es seguro llamar a Stop
+// en paralelo.
+//
+// Abre cada interfaz con el filtro BPF "tcp port N"; las que fallen se anotan y
+// se omiten. Si ninguna se pudo abrir (típicamente porque falta Npcap), devuelve
+// un error y deja el sniffer detenido.
 func (s *Sniffer) Start() error {
 	if !s.running.CompareAndSwap(false, true) {
 		return errors.New("sniffer already running")
@@ -162,7 +173,7 @@ func (s *Sniffer) Start() error {
 	return nil
 }
 
-// Stop closes all handles and waits for the goroutines to exit.
+// Stop cierra todos los handles y espera a que terminen los goroutines.
 func (s *Sniffer) Stop() {
 	if !s.running.CompareAndSwap(true, false) {
 		return
@@ -177,13 +188,13 @@ func (s *Sniffer) Stop() {
 	s.logf("capture stopped (%d packets, %s total)", s.packets.Load(), humanBytes(s.bytes.Load()))
 }
 
-// Running reports whether the sniffer is active.
+// Running indica si el sniffer está activo.
 func (s *Sniffer) Running() bool {
 	return s.running.Load()
 }
 
-// Stats returns the current cumulative counters (rates are 0; live rates
-// arrive through Options.OnStats).
+// Stats devuelve los contadores acumulados actuales (las tasas vienen a 0; las
+// tasas en vivo llegan por Options.OnStats).
 func (s *Sniffer) Stats() Stats {
 	return s.snapshot(0, 0)
 }
@@ -202,8 +213,8 @@ func (s *Sniffer) snapshot(ratePkt, rateBytes float64) Stats {
 	}
 }
 
-// openHandle opens a live capture handle, retrying without promiscuous
-// mode if the driver refuses it.
+// openHandle abre un handle de captura en vivo, reintentando sin modo
+// promiscuo si el driver lo rechaza.
 func openHandle(device string) (*pcap.Handle, error) {
 	h, err := pcap.OpenLive(device, snapLen, true, readTimeout)
 	if err == nil {
@@ -216,6 +227,9 @@ func openHandle(device string) (*pcap.Handle, error) {
 	return h2, nil
 }
 
+// readLoop lee paquetes de un handle hasta que se cierra el handle o Stop. Los
+// timeouts de pcap son normales y se ignoran; un error real solo se reporta si
+// no venía precedido de una parada.
 func (s *Sniffer) readLoop(id int, h *pcap.Handle) {
 	src := gopacket.NewPacketSource(h, h.LinkType())
 	src.DecodeOptions.Lazy = true
@@ -232,7 +246,7 @@ func (s *Sniffer) readLoop(id int, h *pcap.Handle) {
 			}
 			select {
 			case <-s.stopCh:
-				// handle closed by Stop, expected.
+				// handle cerrado por Stop, esperado.
 			default:
 				s.logf("device %d read error: %v", id, err)
 			}
@@ -242,6 +256,9 @@ func (s *Sniffer) readLoop(id int, h *pcap.Handle) {
 	}
 }
 
+// handlePacket actualiza contadores y entrega el paquete TCP al ensamblador. La
+// llamada a AssembleWithTimestamp va bajo s.mu porque el ensamblador no es
+// seguro para uso concurrente entre los distintos dispositivos.
 func (s *Sniffer) handlePacket(pkt gopacket.Packet) {
 	s.packets.Add(1)
 	s.bytes.Add(int64(len(pkt.Data())))
@@ -267,8 +284,10 @@ func (s *Sniffer) handlePacket(pkt gopacket.Packet) {
 	s.mu.Unlock()
 }
 
-// tickLoop pushes stats to the UI every tick and prints a console summary
-// once per second when Options.Console is set.
+// tickLoop publica estadísticas a la interfaz en cada tick e imprime un resumen
+// por consola una vez por segundo cuando Options.Console está activo. Además,
+// cada segundo descarta los streams inactivos para que el ensamblador no acumule
+// conexiones muertas.
 func (s *Sniffer) tickLoop() {
 	ticker := time.NewTicker(tickEvery)
 	defer ticker.Stop()
@@ -296,8 +315,8 @@ func (s *Sniffer) tickLoop() {
 			lastPkt, lastBytes = pkt, by
 
 			if n%4 == 0 {
-				// Drop streams idle for more than 30s so the assembler
-				// does not accumulate dead connections forever.
+				// Descarta los streams con más de 30s de inactividad para que
+				// el ensamblador no acumule conexiones muertas para siempre.
 				s.mu.Lock()
 				s.asm.FlushOlderThan(time.Now().Add(-30 * time.Second))
 				s.mu.Unlock()
@@ -322,6 +341,7 @@ func (s *Sniffer) tickLoop() {
 	}
 }
 
+// logf escribe un mensaje a la consola y, si hay callback, lo entrega a OnLog.
 func (s *Sniffer) logf(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	log.Printf("[sniffer] %s", msg)
@@ -330,6 +350,7 @@ func (s *Sniffer) logf(format string, args ...any) {
 	}
 }
 
+// displayName devuelve la descripción legible de una interfaz, o su nombre.
 func displayName(d pcap.Interface) string {
 	if d.Description != "" {
 		return d.Description
@@ -337,6 +358,7 @@ func displayName(d pcap.Interface) string {
 	return d.Name
 }
 
+// humanBytes formatea un número de bytes en B/KiB/MiB.
 func humanBytes(n int64) string {
 	switch {
 	case n >= 1<<20:

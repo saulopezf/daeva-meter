@@ -4,19 +4,20 @@ import (
 	"unicode/utf8"
 )
 
-// rosterMember is one member extracted from a party roster record (02 97).
+// rosterMember es un miembro extraído de un registro de roster de grupo (02 97).
 type rosterMember struct {
 	Name  string
 	Class int
 	Level int
 }
 
-// parseRosterAt parses a party roster record (spec §8.6) whose opcode sits at
-// b[i:i+2]. The header is validated strictly, which filters out accidental
-// 02 97 byte pairs; member entries are then walked with the documented layout
-// and the variable-length tail is bridged by searching for the next slot.
+// parseRosterAt parsea un registro de roster de grupo (spec §8.6) cuyo opcode
+// está en b[i:i+2]. La cabecera se valida de forma estricta, lo que descarta
+// parejas de bytes 02 97 accidentales; después se recorren las entradas de
+// miembro con el layout documentado y se salva la cola de longitud variable
+// buscando el siguiente slot.
 //
-// Returns ok=false when the header or the first member does not validate.
+// Devuelve ok=false cuando la cabecera o el primer miembro no validan.
 func parseRosterAt(b []byte, i int) (members []rosterMember, ok bool) {
 	o := i + 2
 	if o+4 > len(b) {
@@ -96,9 +97,10 @@ func parseRosterAt(b []byte, i int) (members []rosterMember, ok bool) {
 	return members, true
 }
 
-// findNextMember searches the variable-length tail of a roster member for the
-// start of the next one: next slot number, a plausible server and a valid
-// nickname.
+// findNextMember busca en la cola de longitud variable de un miembro el inicio
+// del siguiente: número de slot consecutivo, servidor plausible y nick válido.
+// Es el puente que permite recorrer miembros pese a los campos de tamaño
+// desconocido que van entre ellos.
 func findNextMember(b []byte, from, prevSlot int) (int, bool) {
 	end := min(from+64, len(b)-11)
 	for p := max(from, 0); p < end; p++ {
@@ -120,7 +122,7 @@ func findNextMember(b []byte, from, prevSlot int) (int, bool) {
 	return 0, false
 }
 
-// validRosterText accepts a short UTF-8 string with no control characters.
+// validRosterText acepta una cadena UTF-8 corta sin caracteres de control.
 func validRosterText(b []byte) bool {
 	if len(b) == 0 || !utf8.Valid(b) {
 		return false
@@ -133,11 +135,12 @@ func validRosterText(b []byte) bool {
 	return true
 }
 
+// le32 lee un entero de 32 bits little-endian de b.
 func le32(b []byte) uint32 {
 	return uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16 | uint32(b[3])<<24
 }
 
-// varintInRange reads a varint at *off and requires it to fall in [lo, hi].
+// varintInRange lee un varint en *off y exige que quede dentro de [lo, hi].
 func varintInRange(b []byte, off *int, lo, hi int) (int, bool) {
 	v, ok := tryVarint(b, off)
 	if !ok || v < lo || v > hi {
@@ -146,8 +149,8 @@ func varintInRange(b []byte, off *int, lo, hi int) (int, bool) {
 	return v, true
 }
 
-// scanRoster searches byte regions for party roster records and feeds them to
-// the combat model.
+// scanRoster busca registros de roster de grupo en las regiones de bytes y los
+// entrega al modelo de combate.
 func (p *Parser) scanRoster(b []byte, regs [][2]int) {
 	for _, r := range regs {
 		for i := r[0]; i+2 < r[1]; i++ {

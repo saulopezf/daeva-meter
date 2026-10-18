@@ -6,17 +6,19 @@ import (
 	"github.com/pierrec/lz4/v4"
 )
 
+// Límites de seguridad del framing. Protegen al parser de longitudes corruptas
+// o maliciosas que podrían provocar reservas de memoria desproporcionadas.
 const (
-	maxPacket       = 65535
-	maxFragmentWait = 16384
-	maxBundleWait   = 65535
-	maxDecompressed = 1_000_000
-	maxBundleDepth  = 4
+	maxPacket       = 65535     // tamaño máximo de un frame
+	maxFragmentWait = 16384     // espera máxima para completar un frame normal
+	maxBundleWait   = 65535     // espera máxima cuando el frame parece un bundle
+	maxDecompressed = 1_000_000 // tamaño máximo de un bundle ya descomprimido
+	maxBundleDepth  = 4         // anidamiento máximo de bundles
 )
 
-// Frame is one framed unit inside the server->client byte stream. PayloadStart
-// is the offset of the payload (opcode) inside the frame, i.e. the number of
-// bytes the leading varint occupies.
+// Frame es una unidad ya enmarcada dentro del stream servidor->cliente.
+// PayloadStart es el desplazamiento del payload (el opcode) dentro del frame, es
+// decir cuántos bytes ocupa el varint de longitud inicial.
 type Frame struct {
 	Start        int
 	End          int
@@ -24,8 +26,10 @@ type Frame struct {
 	Bundle       bool
 }
 
-// tlsRecordSize returns the total size of a TLS record at the start of b, or
-// false if b does not begin with a plausible TLS record header.
+// tlsRecordSize devuelve el tamaño total de un registro TLS al comienzo de b, o
+// false si b no empieza con una cabecera TLS plausible. El servidor usa TLS en
+// el mismo puerto para conexiones que no son de juego, así que el framing debe
+// saltarse esos registros para no confundirlos con frames.
 func tlsRecordSize(b []byte) (int, bool) {
 	if len(b) < 5 || b[0] < 0x14 || b[0] > 0x17 || b[1] != 0x03 || b[2] < 0x01 || b[2] > 0x04 {
 		return 0, false
@@ -34,6 +38,9 @@ func tlsRecordSize(b []byte) (int, bool) {
 	return 5 + l, l > 0 && l <= 16384+256
 }
 
+// bundleHeaderAt indica si en b[at:] hay una cabecera de bundle válida
+// (magia FF FF seguida del tamaño sin comprimir, little-endian). Se usa para
+// decidir cuánto esperar antes de tratar un frame incompleto como fragmento.
 func bundleHeaderAt(b []byte, at int) bool {
 	if at+6 > len(b) {
 		return false
@@ -42,14 +49,22 @@ func bundleHeaderAt(b []byte, at int) bool {
 	return b[at] == 0xFF && b[at+1] == 0xFF && sz > 0 && sz <= maxDecompressed
 }
 
-// walk scans the outer server->client stream, resynchronising byte by byte
-// when it finds garbage or a mis-sized length. It returns the frames found and
-// the number of bytes safely consumed (everything before the first incomplete
-// frame).
+// walk recorre el stream exterior servidor->cliente y delimita frames.
+//
+// Estrategia: va leyendo el varint de longitud de cada frame (longitud total =
+// L - 4 + n, donde n son los bytes del varint) y comprueba su coherencia. Como
+// el stream puede empezar en mitad de una transmisión o contener basura,
+// resincroniza avanzando byte a byte cuando encuentra un tamaño imposible. Si el
+// frame está bien formado pero aún no han llegado todos sus bytes, se detiene:
+// es un fragmento legítimo y hay que esperar más datos (limitado por
+// maxFragmentWait/maxBundleWait).
+//
+// Devuelve los frames hallados y el número de bytes consumidos con seguridad
+// (todo lo anterior al primer frame incompleto).
 func walk(b []byte) (frames []Frame, consumed int) {
 	off := 0
 	for off < len(b) {
-		if b[off] == 0x00 {
+		if b[off] == 0x00 { // relleno
 			off++
 			continue
 		}
@@ -65,7 +80,7 @@ func walk(b []byte) (frames []Frame, consumed int) {
 			if off+5 > len(b) {
 				break
 			}
-			off++
+			off++ // byte de basura: resincroniza
 			continue
 		}
 		size := int(L) - 4 + n
@@ -83,10 +98,10 @@ func walk(b []byte) (frames []Frame, consumed int) {
 				limit = maxBundleWait
 			}
 			if size > limit {
-				off++
+				off++ // tamaño irreal para un fragmento: probable basura
 				continue
 			}
-			break // legitimate fragment: wait for more data
+			break // fragmento legítimo: espera a recibir más datos
 		}
 		isBundle := n+1 < size && b[off+n] == 0xFF && b[off+n+1] == 0xFF
 		frames = append(frames, Frame{Start: off, End: off + size, PayloadStart: n, Bundle: isBundle})
@@ -95,8 +110,9 @@ func walk(b []byte) (frames []Frame, consumed int) {
 	return frames, off
 }
 
-// walkInner scans the decompressed content of a bundle. It never
-// resynchronises: the first sign of trouble stops the scan.
+// walkInner recorre el contenido ya descomprimido de un bundle. A diferencia de
+// walk, nunca resincroniza: al primer indicio de problema se detiene, porque el
+// contenido sano de un bundle siempre está perfectamente enmarcado.
 func walkInner(b []byte) []Frame {
 	var frames []Frame
 	off := 0
@@ -123,8 +139,9 @@ func walkInner(b []byte) []Frame {
 	return frames
 }
 
-// decompressBundle inflates a bundle payload that starts at the FF FF magic:
-// FF FF <u32 LE uncompressed size> <raw LZ4 block>.
+// decompressBundle infla el payload de un bundle, que empieza con la magia:
+//
+//	FF FF <u32 LE tamaño sin comprimir> <bloque LZ4 crudo>
 func decompressBundle(payload []byte) ([]byte, bool) {
 	if len(payload) < 7 {
 		return nil, false
@@ -141,10 +158,10 @@ func decompressBundle(payload []byte) ([]byte, bool) {
 	return dst[:n], true
 }
 
-// regions returns the byte ranges to scan for embedded records: the gaps
-// between frames, the non-bundle frames themselves, and any trailing bytes.
-// Bundle frames are excluded because their content is scanned after
-// decompression.
+// regions devuelve los rangos de bytes que hay que escanear buscando registros
+// embebidos: los huecos entre frames, los propios frames que no son bundles y
+// los bytes finales sobrantes. Los frames de bundle se excluyen porque su
+// contenido se escanea tras descomprimirlo.
 func regions(frames []Frame, end int) [][2]int {
 	var out [][2]int
 	at := 0

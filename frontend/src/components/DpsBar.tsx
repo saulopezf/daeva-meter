@@ -7,7 +7,11 @@ interface DpsBarProps {
   maxDps: number;
 }
 
+// DpsBar pinta una fila de la tabla de DPS: puesto, nombre, clase, DPS, daño
+// total y una barra proporcional al DPS del primer puesto (maxDps).
 export function DpsBar({ member, rank, maxDps }: DpsBarProps) {
+  // La barra se escala sobre maxDps y tiene un mínimo del 2% para seguir siendo
+  // visible en los puestos bajos.
   const pct = maxDps > 0 ? Math.max(2, (member.dps / maxDps) * 100) : 0;
   return (
     <div className="row">

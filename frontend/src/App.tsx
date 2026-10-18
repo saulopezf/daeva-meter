@@ -5,6 +5,7 @@ import { DpsBar } from './components/DpsBar';
 import { fmtCompact } from './format';
 import type { CaptureState, CombatSnapshot, CombatMember, Stats } from './types';
 
+// Valores por defecto mientras llega el primer estado desde el backend.
 const EMPTY_STATS: Stats = {
   devices: 0,
   packets: 0,
@@ -26,6 +27,7 @@ const EMPTY_COMBAT: CombatSnapshot = {
   party: [],
 };
 
+// Estado global de la captura derivado del backend y de las estadísticas.
 type Status = 'connecting' | 'live' | 'listening' | 'stopped' | 'error';
 
 const STATUS_LABEL: Record<Status, string> = {
@@ -36,6 +38,9 @@ const STATUS_LABEL: Record<Status, string> = {
   error: 'ERROR',
 };
 
+// App es la raíz de la interfaz. Consulta el estado inicial, se suscribe a los
+// eventos del backend (estadísticas, logs y actualizaciones de combate) y pinta
+// la cabecera, la tabla de DPS y el pie con contadores.
 export default function App() {
   const [state, setState] = useState<CaptureState | null>(null);
   const [stats, setStats] = useState<Stats>(EMPTY_STATS);
@@ -43,10 +48,12 @@ export default function App() {
   const [logs, setLogs] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
+  // pushLog conserva solo las últimas 5 líneas de log para el pie.
   const pushLog = useCallback((msg: string) => {
     setLogs((prev) => [...prev.slice(-4), msg]);
   }, []);
 
+  // refresh trae el estado completo del backend (captura + combate) bajo demanda.
   const refresh = useCallback(async () => {
     try {
       const s = await CaptureStatus();
@@ -58,6 +65,9 @@ export default function App() {
     }
   }, [pushLog]);
 
+  // Al montar: carga el estado y se suscribe a los eventos del backend. Los
+  // eventos "combat:update" llegan dos veces por segundo, así que la tabla se
+  // refresca en vivo sin polling.
   useEffect(() => {
     void refresh();
     EventsOn('capture:stats', (st: Stats) => setStats(st));
@@ -70,6 +80,7 @@ export default function App() {
     };
   }, [refresh, pushLog]);
 
+  // toggle arranca o detiene la captura según el estado actual.
   const toggle = useCallback(async () => {
     setBusy(true);
     try {
@@ -86,6 +97,7 @@ export default function App() {
     }
   }, [state, refresh, pushLog]);
 
+  // Deriva la etiqueta de estado a partir de los datos del backend.
   const status: Status =
     state === null
       ? 'connecting'
@@ -98,6 +110,7 @@ export default function App() {
             : 'listening';
 
   const members: CombatMember[] = combat.members ?? [];
+  // Máximo de DPS para escalar las barras de forma relativa al primero.
   const maxDps = Math.max(...members.map((m) => m.dps), 1);
   const lastLog = logs.length > 0 ? logs[logs.length - 1] : '';
 
@@ -144,11 +157,11 @@ export default function App() {
 
       <footer>
         <div className="stats">
-          <span title="capture devices">{stats.devices} dev</span>
-          <span title="reassembled TCP streams">{stats.streams} str</span>
-          <span title="packets per second">{Math.round(stats.packetsPerSec)} pps</span>
-          <span title="bytes captured">{fmtCompact(stats.bytes)}</span>
-          <span title="reassembly gaps">g{stats.gaps}</span>
+          <span title="dispositivos de captura">{stats.devices} dev</span>
+          <span title="streams TCP reensamblados">{stats.streams} str</span>
+          <span title="paquetes por segundo">{Math.round(stats.packetsPerSec)} pps</span>
+          <span title="bytes capturados">{fmtCompact(stats.bytes)}</span>
+          <span title="huecos de reensamblado">g{stats.gaps}</span>
         </div>
         <div className="log" title={lastLog}>
           {lastLog || 'waiting for capture…'}

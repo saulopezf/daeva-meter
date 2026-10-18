@@ -6,11 +6,12 @@ import (
 	"time"
 )
 
-// idleTimeout is how long an encounter stays active after the last hit. When it
-// elapses the encounter is frozen; the next qualifying hit starts a new one.
+// idleTimeout es cuánto tiempo sigue activo un encuentro tras el último golpe.
+// Cuando transcurre, el encuentro se congela; el siguiente golpe válido inicia
+// uno nuevo.
 const idleTimeout = 5 * time.Second
 
-// Entity is a game object seen on the wire: a player, an NPC or a summon.
+// Entity es un objeto de juego visto en el cable: un jugador, un NPC o un summon.
 type Entity struct {
 	ID       int
 	Name     string
@@ -20,10 +21,10 @@ type Entity struct {
 	IsPlayer bool
 	Self     bool
 	NPC      bool
-	Owner    int // owner id for summons/pets
+	Owner    int // id del dueño para summons/mascotas
 }
 
-// Hit is one damage/heal event produced by the damage parser.
+// Hit es un evento de daño/curación producido por el parser de daño.
 type Hit struct {
 	Target      int
 	Actor       int
@@ -38,7 +39,7 @@ type Hit struct {
 	NPCSkill    bool
 }
 
-// MemberStat is a per-actor damage aggregate as shown on the DPS board.
+// MemberStat es el daño agregado por actor tal y como aparece en la tabla de DPS.
 type MemberStat struct {
 	ID     int     `json:"id"`
 	Name   string  `json:"name"`
@@ -51,7 +52,8 @@ type MemberStat struct {
 	Self   bool    `json:"self"`
 }
 
-// Snapshot is the JSON-friendly combat state pushed to the frontend.
+// Snapshot es el estado de combate listo para serializar a JSON y enviar al
+// frontend.
 type Snapshot struct {
 	Active  bool         `json:"active"`
 	Elapsed float64      `json:"elapsed"`
@@ -61,7 +63,7 @@ type Snapshot struct {
 	Party   []string     `json:"party"`
 }
 
-// encounter is one fight: per-actor damage totals plus its time window.
+// encounter es una pelea: daño acumulado por actor más su ventana temporal.
 type encounter struct {
 	start  time.Time
 	last   time.Time
@@ -83,13 +85,14 @@ type partyInfo struct {
 	Level int
 }
 
-// Combat accumulates encounters for the DPS board. Only the local player and
-// known group members are tracked; damage from other players is discarded.
+// Combat acumula encuentros para la tabla de DPS. Solo se rastrea al jugador
+// local y a los miembros conocidos del grupo; el daño de otros jugadores se
+// descarta.
 type Combat struct {
 	mu sync.Mutex
 
-	// OnHit, when set, is called for every damage event that reaches AddHit.
-	// Used by tests.
+	// OnHit, si se define, se llama por cada evento de daño que llega a AddHit.
+	// Lo usan los tests.
 	OnHit func(Hit)
 
 	entities map[int]*Entity
@@ -103,7 +106,7 @@ type Combat struct {
 	party      map[int]struct{}
 }
 
-// NewCombat returns an empty combat model.
+// NewCombat devuelve un modelo de combate vacío.
 func NewCombat() *Combat {
 	return &Combat{
 		entities:   map[int]*Entity{},
@@ -113,6 +116,7 @@ func NewCombat() *Combat {
 	}
 }
 
+// ensure devuelve la entidad con ese id, creándola si aún no existe.
 func (c *Combat) ensure(id int) *Entity {
 	e := c.entities[id]
 	if e == nil {
@@ -122,7 +126,9 @@ func (c *Combat) ensure(id int) *Entity {
 	return e
 }
 
-// SetSelfID records the local player's entity id (from 33 36 or 4A 36).
+// SetSelfID registra el id de entidad del jugador local (de 33 36 o 4A 36).
+// Si antes no conocíamos quién éramos, se descarta el encuentro en curso:
+// podría contener daño de otros jugadores contado en modo permisivo.
 func (c *Combat) SetSelfID(id int) {
 	if id <= 0 {
 		return
@@ -135,12 +141,13 @@ func (c *Combat) SetSelfID(id int) {
 	e.Self = true
 	e.IsPlayer = true
 	if wasUnknown {
-		// Drop anything counted while we still did not know who we were.
 		c.cur = nil
 	}
 }
 
-// SetIdentity records the name/class/level of an entity.
+// SetIdentity registra el nombre/clase/nivel de una entidad. Para self también
+// fija servidor, clase y nivel, y descarta el encuentro si hasta ahora no nos
+// conocíamos.
 func (c *Combat) SetIdentity(id int, name string, self bool, server, class, level int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -164,7 +171,8 @@ func (c *Combat) SetIdentity(id int, name string, self bool, server, class, leve
 	}
 }
 
-// SetName records a name discovered by a non-identity record (spawn, loot...).
+// SetName registra un nombre descubierto por un registro que no es de identidad
+// (spawn, botín...).
 func (c *Combat) SetName(id int, name string) {
 	if name == "" {
 		return
@@ -177,7 +185,8 @@ func (c *Combat) SetName(id int, name string) {
 	c.resolvePartyLocked(id, name)
 }
 
-// MarkNPC flags an entity as a non-player object.
+// MarkNPC marca una entidad como objeto no jugador. owner, si es > 0, es el id
+// de su dueño (mascotas/summons).
 func (c *Combat) MarkNPC(id int, owner int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -191,8 +200,8 @@ func (c *Combat) MarkNPC(id int, owner int) {
 	}
 }
 
-// SetParty replaces the known group roster. It is authoritative: clearing and
-// rescanning keeps ids and names consistent.
+// SetParty reemplaza el roster de grupo conocido. Es autoritativo: vaciar y
+// volver a escanear mantiene ids y nombres coherentes.
 func (c *Combat) SetParty(members []rosterMember) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -203,7 +212,7 @@ func (c *Combat) SetParty(members []rosterMember) {
 	}
 }
 
-// ClearParty forgets the group (on group/raid exit).
+// ClearParty olvida el grupo (al salir de grupo o raid).
 func (c *Combat) ClearParty() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -211,6 +220,7 @@ func (c *Combat) ClearParty() {
 	c.party = map[int]struct{}{}
 }
 
+// addPartyLocked añade un nombre al roster y, si ya conocemos su id, lo enlaza.
 func (c *Combat) addPartyLocked(name string, class, level int) {
 	if name == "" {
 		return
@@ -228,7 +238,8 @@ func (c *Combat) addPartyLocked(name string, class, level int) {
 	}
 }
 
-// resolvePartyLocked links an entity to the group if its name is on the roster.
+// resolvePartyLocked enlaza una entidad con el grupo si su nombre está en el
+// roster. Permite que llegue la identidad antes que el roster y viceversa.
 func (c *Combat) resolvePartyLocked(id int, name string) {
 	info, ok := c.partyNames[name]
 	if !ok {
@@ -244,6 +255,7 @@ func (c *Combat) resolvePartyLocked(id int, name string) {
 	}
 }
 
+// hasID indica si el id ya se ha visto como entidad.
 func (c *Combat) hasID(id int) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -251,6 +263,7 @@ func (c *Combat) hasID(id int) bool {
 	return ok
 }
 
+// isMob indica si el id corresponde a un NPC.
 func (c *Combat) isMob(id int) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -258,6 +271,7 @@ func (c *Combat) isMob(id int) bool {
 	return e != nil && e.NPC
 }
 
+// isKnownPlayer indica si el id corresponde a un jugador conocido.
 func (c *Combat) isKnownPlayer(id int) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -265,10 +279,10 @@ func (c *Combat) isKnownPlayer(id int) bool {
 	return e != nil && e.IsPlayer
 }
 
-// isGroupActorLocked reports whether a damage actor should be tracked. Before
-// the local player is known it accepts everything (better than showing
-// nothing); afterwards it is strict: self, known group, or a summon/pet whose
-// owner belongs to the group.
+// isGroupActorLocked indica si el actor de un daño debe contarse. Antes de
+// conocer al jugador local se acepta todo (mejor mostrar algo que nada); después
+// es estricto: uno mismo, el grupo conocido, o un summon/mascota cuyo dueño
+// pertenece al grupo.
 func (c *Combat) isGroupActorLocked(id int) bool {
 	if c.selfID == 0 {
 		return true
@@ -289,8 +303,13 @@ func (c *Combat) isGroupActorLocked(id int) bool {
 	return false
 }
 
-// AddHit folds a damage event into the current encounter. Damage received (NPC
-// skills), self-damage and damage from non-group players are ignored.
+// AddHit incorpora un evento de daño al encuentro actual. El daño recibido
+// (habilidades de NPC), el auto-daño y el daño de jugadores fuera del grupo se
+// ignoran.
+//
+// Si el encuentro actual lleva más de idleTimeout sin actividad, se abre uno
+// nuevo. El total de daño es Damage + ExtraDamage (golpes adicionales del mismo
+// lanzamiento).
 func (c *Combat) AddHit(ts time.Time, h Hit) {
 	if h.NPCSkill {
 		return
@@ -321,16 +340,21 @@ func (c *Combat) AddHit(ts time.Time, h Hit) {
 	c.cur.last = ts
 }
 
-// ResetEncounter discards the current and frozen encounter (zone change).
+// ResetEncounter descarta el encuentro actual y el congelado (cambio de zona).
 func (c *Combat) ResetEncounter() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.cur = nil
 }
 
-// Snapshot builds the current DPS board. now is the wall clock used to decide
-// whether the encounter is still active. A frozen (finished) encounter is kept
-// visible until the next one starts.
+// Snapshot construye la tabla de DPS actual. now es el reloj de pared que decide
+// si el encuentro sigue activo. Un encuentro congelado (terminado) se mantiene
+// visible hasta que empiece el siguiente.
+//
+// Agrega por nombre canónico y no por id de entidad: un jugador puede tener
+// varios ids (los summons y hechizos de suelo llevan el nombre del dueño, y el
+// juego puede reasignar ids al cargar zona). Sumar todo lo que resuelve al mismo
+// nombre produce una fila por jugador, con sus mascotas incluidas.
 func (c *Combat) Snapshot(now time.Time) Snapshot {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -353,10 +377,6 @@ func (c *Combat) Snapshot(now time.Time) Snapshot {
 	if snap.Elapsed < 0.001 {
 		snap.Elapsed = 0.001
 	}
-	// Aggregate by canonical name, not by entity id: a player may own several
-	// ids (summons and ground spells carry the owner's inline name, and the
-	// game may reassign ids on a zone load). Summing everything that resolves to
-	// the same name yields one row per player with their pets included.
 	rows := map[string]*aggRow{}
 	for id, dmg := range enc.damage {
 		e := c.entities[id]
@@ -375,8 +395,8 @@ func (c *Combat) Snapshot(now time.Time) Snapshot {
 		if e.Self {
 			r.self = true
 		}
-		// Prefer the row's id and class from a real player entity rather than
-		// from one of their summons.
+		// Se prefiere el id y la clase de una entidad jugador real antes que los
+		// de uno de sus summons.
 		if realPlayer := e.IsPlayer && !e.NPC; realPlayer && !r.player {
 			r.player = true
 			r.id = id
@@ -413,22 +433,22 @@ func (c *Combat) Snapshot(now time.Time) Snapshot {
 	return snap
 }
 
-// aggRow accumulates the damage of every entity id that resolves to the same
-// canonical player name.
+// aggRow acumula el daño de todas las entidades que resuelven al mismo nombre
+// canónico de jugador.
 type aggRow struct {
 	id     int
 	name   string
 	class  int
 	self   bool
-	player bool // set once a real (non-summon) player entity was merged in
+	player bool // se activa al fusionar una entidad jugador real (no summon)
 	damage int64
 	hits   int
 	crits  int
 }
 
-// actorKeyLocked maps an actor to its canonical board row. Summons and ground
-// spells (NPC entities named after their owner) resolve to the owner's name;
-// entities without a name fall back to their id.
+// actorKeyLocked asigna un actor a su fila canónica en la tabla. Los summons y
+// hechizos de suelo (entidades NPC con el nombre de su dueño) resuelven al
+// nombre del dueño; las entidades sin nombre caen a su id.
 func (c *Combat) actorKeyLocked(e *Entity, id int) (key, name string) {
 	if e != nil {
 		if e.Name != "" {
@@ -443,7 +463,8 @@ func (c *Combat) actorKeyLocked(e *Entity, id int) (key, name string) {
 	return "i:" + itoa(id), "#" + itoa(id)
 }
 
-// Entities returns a snapshot of every entity seen (for debugging/replay).
+// Entities devuelve una instantánea de todas las entidades vistas (para depurar
+// o reproducir capturas).
 func (c *Combat) Entities() []Entity {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -455,7 +476,7 @@ func (c *Combat) Entities() []Entity {
 	return out
 }
 
-// itoa converts a non-negative int to decimal without allocations.
+// itoa convierte un int a decimal sin asignaciones de memoria.
 func itoa(v int) string {
 	if v == 0 {
 		return "0"

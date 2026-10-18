@@ -8,11 +8,13 @@ import (
 	"github.com/google/gopacket/tcpassembly"
 )
 
-// streamFactory creates one sniffStream per TCP direction.
+// streamFactory crea un sniffStream por cada sentido de un flujo TCP.
 type streamFactory struct {
 	s *Sniffer
 }
 
+// New se llama cuando aparece un flujo TCP nuevo: asigna un id incremental,
+// clasifica su dirección y crea el stream correspondiente.
 func (f *streamFactory) New(netFlow, tcpFlow gopacket.Flow) tcpassembly.Stream {
 	n := f.s.streams.Add(1)
 	dir := flowDirection(tcpFlow, f.s.opts.Port)
@@ -21,7 +23,7 @@ func (f *streamFactory) New(netFlow, tcpFlow gopacket.Flow) tcpassembly.Stream {
 	return &sniffStream{s: f.s, id: n, dir: dir}
 }
 
-// flowDirection classifies a TCP flow by which side uses the game port.
+// flowDirection clasifica un flujo TCP según qué extremo usa el puerto del juego.
 func flowDirection(tcpFlow gopacket.Flow, port uint16) Direction {
 	p := strconv.FormatUint(uint64(port), 10)
 	switch {
@@ -34,9 +36,9 @@ func flowDirection(tcpFlow gopacket.Flow, port uint16) Direction {
 	}
 }
 
-// sniffStream receives reassembled payload bytes for one TCP direction.
-// Callbacks run synchronously inside Assembler calls, so they are already
-// serialized under Sniffer.mu.
+// sniffStream recibe los bytes de payload reensamblados de un sentido de un flujo
+// TCP. Los callbacks se ejecutan de forma síncrona dentro de las llamadas al
+// Assembler, así que ya están serializados bajo Sniffer.mu.
 type sniffStream struct {
 	s          *Sniffer
 	id         int64
@@ -47,6 +49,9 @@ type sniffStream struct {
 	ignore     bool
 }
 
+// Reassembled entrega los segmentos ya reensamblados de este stream. Avisa de
+// huecos (segmentos perdidos o captura empezada a mitad), decide una sola vez por
+// conexión si es TLS y, si no lo es, reenvía los bytes al callback OnPayload.
 func (st *sniffStream) Reassembled(segs []tcpassembly.Reassembly) {
 	for _, seg := range segs {
 		if seg.Skip != 0 {
@@ -59,8 +64,8 @@ func (st *sniffStream) Reassembled(segs []tcpassembly.Reassembly) {
 		if len(seg.Bytes) == 0 {
 			continue
 		}
-		// The server also speaks TLS on the same port, in a separate
-		// connection. Decide once per connection with its first payload.
+		// El servidor también habla TLS en el mismo puerto, en una conexión
+		// aparte. Se decide una vez por conexión con su primer payload.
 		if !st.classified {
 			st.classified = true
 			if looksLikeTLSRecord(seg.Bytes) {
@@ -90,8 +95,8 @@ func (st *sniffStream) Reassembled(segs []tcpassembly.Reassembly) {
 	}
 }
 
-// looksLikeTLSRecord reports whether b begins with a plausible TLS record
-// header (type 0x14..0x17, version 0x03 0x01..0x04, length 1..16640).
+// looksLikeTLSRecord indica si b empieza con una cabecera de registro TLS
+// plausible (tipo 0x14..0x17, versión 0x03 0x01..0x04, longitud 1..16640).
 func looksLikeTLSRecord(b []byte) bool {
 	if len(b) < 5 {
 		return false
@@ -103,6 +108,7 @@ func looksLikeTLSRecord(b []byte) bool {
 	return l > 0 && l <= 16384+256
 }
 
+// ReassemblyComplete se llama cuando el flujo TCP termina.
 func (st *sniffStream) ReassemblyComplete() {
 	st.s.logf("stream #%d closed", st.id)
 }

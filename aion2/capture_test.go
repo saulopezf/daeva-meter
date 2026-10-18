@@ -12,14 +12,14 @@ import (
 	"time"
 )
 
-// captureLine matches one line of a session log:
+// captureLine reconoce una línea del log de sesión:
 //
 //	+12.345 S2C stream=1 len=42 aabbcc...
 var captureLine = regexp.MustCompile(`^\+([0-9.]+) (S2C|C2S) stream=(\d+) len=(\d+) ([0-9a-f]+)$`)
 
-// feedCapture feeds a session log through the parser exactly like the live
-// pipeline does (one buffer per TCP stream, in capture order). When onSnapshot
-// is set it is called after every fed segment with the current board.
+// feedCapture pasa un log de sesión por el parser exactamente como lo hace el
+// pipeline en vivo (un buffer por stream TCP, en orden de captura). Si onSnapshot
+// está definido, se llama tras cada segmento alimentado con la tabla actual.
 func feedCapture(t *testing.T, path string, onSnapshot func(sec float64, snap Snapshot)) (*Combat, Snapshot) {
 	t.Helper()
 	f, err := os.Open(path)
@@ -61,7 +61,7 @@ func feedCapture(t *testing.T, path string, onSnapshot func(sec float64, snap Sn
 	return combat, combat.Snapshot(base.Add(time.Duration(maxSec * float64(time.Second))))
 }
 
-// replayCapture feeds a session log and returns the final board.
+// replayCapture alimenta un log de sesión y devuelve la tabla final.
 func replayCapture(t *testing.T, path string) (*Combat, Snapshot) {
 	t.Helper()
 	return feedCapture(t, path, nil)
@@ -82,9 +82,9 @@ func findEntity(t *testing.T, c *Combat, id int) Entity {
 	return Entity{}
 }
 
-// TestCaptureTemplar pins a solo fight: a single encounter with the local
-// character's own damage only. The character name is read from the capture
-// rather than hardcoded, so no real player name lives in the source.
+// TestCaptureTemplar fija una pelea en solitario: un único encuentro con el daño
+// solo del personaje local. El nombre del personaje se lee de la captura en vez
+// de estar fijado, para no dejar ningún nombre real de jugador en el código.
 func TestCaptureTemplar(t *testing.T) {
 	path := capturePath("session-20261016-215243.txt")
 	if _, err := os.Stat(path); err != nil {
@@ -121,8 +121,8 @@ func TestCaptureTemplar(t *testing.T) {
 	}
 }
 
-// TestCaptureSorcererNoBystanders pins the key regression: in a crowded zone
-// the board shows only the local player, never the other players' damage.
+// TestCaptureSorcererNoBystanders fija la regresión clave: en una zona poblada la
+// tabla muestra solo al jugador local, nunca el daño de otros jugadores.
 func TestCaptureSorcererNoBystanders(t *testing.T) {
 	path := capturePath("session-20261016-221433.txt")
 	if _, err := os.Stat(path); err != nil {
@@ -148,7 +148,7 @@ func TestCaptureSorcererNoBystanders(t *testing.T) {
 		t.Errorf("member = %q, want the local player %q", snap.Members[0].Name, snap.Self)
 	}
 
-	// Other players seen via 45 36 must not appear on the board.
+	// Otros jugadores vistos vía 45 36 no deben aparecer en la tabla.
 	board := map[int]bool{}
 	for _, m := range snap.Members {
 		board[m.ID] = true
@@ -163,10 +163,11 @@ func TestCaptureSorcererNoBystanders(t *testing.T) {
 	}
 }
 
-// TestCaptureGroupNoDuplicateNames replays a dungeon run and checks that the
-// board never lists the same player twice, even though pets and ground spells
-// fight under their owner's name and the game reassigns entity ids on a zone
-// load. Roster names are derived from the capture, not hardcoded.
+// TestCaptureGroupNoDuplicateNames reproduce una incursión a mazmorra y comprueba
+// que la tabla nunca lista dos veces al mismo jugador, aunque las mascotas y los
+// hechizos de suelo peleen bajo el nombre de su dueño y el juego reasigne ids de
+// entidad al cargar zona. Los nombres del roster se derivan de la captura, no
+// están fijados.
 func TestCaptureGroupNoDuplicateNames(t *testing.T) {
 	path := capturePath("session-20261017-015343.txt")
 	if _, err := os.Stat(path); err != nil {
@@ -203,7 +204,7 @@ func TestCaptureGroupNoDuplicateNames(t *testing.T) {
 	if !contains(snap.Party, snap.Self) {
 		t.Errorf("self %q not in party %v", snap.Self, snap.Party)
 	}
-	// Every roster name must belong to a real player entity we saw.
+	// Cada nombre del roster debe pertenecer a una entidad jugador real vista.
 	players := map[string]bool{}
 	for _, e := range combat.Entities() {
 		if e.Name != "" && (e.IsPlayer || e.Self) {

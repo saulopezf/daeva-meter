@@ -23,6 +23,8 @@ func TestClassName(t *testing.T) {
 	}
 }
 
+// TestEncounterMergesCloseHits verifica que dos golpes separados menos que
+// idleTimeout se suman en el mismo encuentro.
 func TestEncounterMergesCloseHits(t *testing.T) {
 	c := NewCombat()
 	c.SetSelfID(100)
@@ -39,6 +41,8 @@ func TestEncounterMergesCloseHits(t *testing.T) {
 	}
 }
 
+// TestEncounterSplitsAfterIdle verifica que un golpe tras más de idleTimeout
+// inicia un encuentro nuevo (solo cuenta el daño nuevo).
 func TestEncounterSplitsAfterIdle(t *testing.T) {
 	c := NewCombat()
 	c.SetSelfID(100)
@@ -52,6 +56,8 @@ func TestEncounterSplitsAfterIdle(t *testing.T) {
 	}
 }
 
+// TestEncounterFreezes verifica que un encuentro sin actividad reciente queda
+// congelado (inactivo) pero sigue visible.
 func TestEncounterFreezes(t *testing.T) {
 	c := NewCombat()
 	c.SetSelfID(100)
@@ -67,6 +73,8 @@ func TestEncounterFreezes(t *testing.T) {
 	}
 }
 
+// TestNonGroupActorIgnored verifica que el daño de un actor fuera del grupo se
+// descarta una vez conocida la identidad propia.
 func TestNonGroupActorIgnored(t *testing.T) {
 	c := NewCombat()
 	c.SetSelfID(100)
@@ -78,6 +86,8 @@ func TestNonGroupActorIgnored(t *testing.T) {
 	}
 }
 
+// TestPartyMemberCounted verifica que un miembro del grupo con identidad
+// resuelta se cuenta y aparece en la tabla.
 func TestPartyMemberCounted(t *testing.T) {
 	c := NewCombat()
 	c.SetSelfID(100)
@@ -99,8 +109,9 @@ func TestPartyMemberCounted(t *testing.T) {
 	}
 }
 
+// TestPartyResolvesNameBeforeIdentity cubre el orden inverso: la identidad llega
+// antes que el roster y el roster debe enlazar igualmente el nombre.
 func TestPartyResolvesNameBeforeIdentity(t *testing.T) {
-	// Identity arrives before the roster: the roster must still link the name.
 	c := NewCombat()
 	c.SetSelfID(100)
 	c.SetIdentity(300, "Buddy", false, 0, 0, 0)
@@ -113,6 +124,8 @@ func TestPartyResolvesNameBeforeIdentity(t *testing.T) {
 	}
 }
 
+// TestClearParty verifica que al salir del grupo se olvida el roster y deja de
+// contarse el daño de sus miembros.
 func TestClearParty(t *testing.T) {
 	c := NewCombat()
 	c.SetSelfID(100)
@@ -130,29 +143,30 @@ func TestClearParty(t *testing.T) {
 	}
 }
 
+// TestUnknownSelfIsPermissive verifica el modo permisivo: mientras no se conoce
+// el id propio se muestra todo, y al conocerse se descarta lo anterior.
 func TestUnknownSelfIsPermissive(t *testing.T) {
-	// Before the local id is known we keep data rather than showing nothing.
 	c := NewCombat()
 	t0 := time.Unix(1000, 0)
 	c.AddHit(t0, Hit{Actor: 999, Target: 200, Damage: 500, HitType: 1})
 	if snap := c.Snapshot(t0); len(snap.Members) != 1 {
 		t.Fatalf("members = %+v, want one while self is unknown", snap.Members)
 	}
-	// Once self is known, the pre-identity data is discarded.
+	// Al conocerse self, se descartan los datos previos a la identidad.
 	c.SetSelfID(100)
 	if snap := c.Snapshot(t0); len(snap.Members) != 0 {
 		t.Fatalf("members = %+v, want none after self is resolved", snap.Members)
 	}
 }
 
+// TestSummonMergedIntoOwner verifica que un summon/hechizo de suelo que lleva el
+// nombre del dueño suma su daño en la fila única del dueño.
 func TestSummonMergedIntoOwner(t *testing.T) {
-	// A pet/ground spell is an NPC entity that carries the owner's name; its
-	// damage must roll into the owner's single row.
 	c := NewCombat()
 	c.SetSelfID(100)
 	c.SetParty([]rosterMember{{Name: "Hero", Class: 25, Level: 33}})
 	c.SetIdentity(100, "Hero", true, 0, 25, 33)
-	c.SetName(200, "Hero") // summon named after its owner
+	c.SetName(200, "Hero") // summon con el nombre de su dueño
 	c.MarkNPC(200, 0)
 
 	t0 := time.Unix(1000, 0)
@@ -169,9 +183,9 @@ func TestSummonMergedIntoOwner(t *testing.T) {
 	}
 }
 
+// TestMultiplePlayerIDsMerged verifica que un mismo jugador con varios ids de
+// entidad (recarga de zona) ocupa una sola fila.
 func TestMultiplePlayerIDsMerged(t *testing.T) {
-	// The same player can hold several entity ids (zone reload reassigns them);
-	// the board must show one row.
 	c := NewCombat()
 	c.SetSelfID(100)
 	c.SetParty([]rosterMember{{Name: "Ally", Class: 11, Level: 40}})
@@ -191,13 +205,14 @@ func TestMultiplePlayerIDsMerged(t *testing.T) {
 	}
 }
 
+// TestSummonAttributedByOwner verifica que un summon sin nombre propio se
+// atribuye a su dueño a través del id del dueño.
 func TestSummonAttributedByOwner(t *testing.T) {
-	// A summon with no inline name is attributed through its owner id.
 	c := NewCombat()
 	c.SetSelfID(100)
 	c.SetParty([]rosterMember{{Name: "Ally", Class: 11, Level: 40}})
 	c.SetIdentity(300, "Ally", false, 0, 11, 40)
-	c.MarkNPC(500, 300) // summon owned by Ally, no name of its own
+	c.MarkNPC(500, 300) // summon de Ally, sin nombre propio
 
 	t0 := time.Unix(1000, 0)
 	c.AddHit(t0, Hit{Actor: 300, Target: 900, Damage: 100, HitType: 1})
@@ -212,11 +227,12 @@ func TestSummonAttributedByOwner(t *testing.T) {
 	}
 }
 
+// TestForeignSummonIgnored verifica que una mascota de un jugador fuera del grupo
+// no se cuenta.
 func TestForeignSummonIgnored(t *testing.T) {
-	// A pet owned by a player outside the group must not be counted.
 	c := NewCombat()
 	c.SetSelfID(100)
-	c.MarkNPC(500, 999) // owner 999 is not in the group
+	c.MarkNPC(500, 999) // el dueño 999 no está en el grupo
 
 	t0 := time.Unix(1000, 0)
 	c.AddHit(t0, Hit{Actor: 500, Target: 900, Damage: 40, HitType: 1})

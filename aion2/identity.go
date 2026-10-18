@@ -6,16 +6,18 @@ import (
 	"unicode/utf8"
 )
 
-// opIdentitySelf is your own character record; opIdentityOther is another
-// player (pre-June 2026 it was 44 36).
+// opIdentitySelf es tu propio registro de personaje; opIdentityOther es otro
+// jugador (antes de junio de 2026 era 44 36).
 var (
 	opIdentitySelf  = [2]byte{0x33, 0x36}
 	opIdentityOther = [2]byte{0x45, 0x36}
 )
 
-// exactName validates the name field of an identity/spawn record: 1..=48 bytes
-// of valid UTF-8, 1..=12 alphanumeric characters (any alphabet) with at least
-// one letter. The whole field must be the name.
+// exactName valida el campo de nombre de un registro de identidad o de spawn:
+// entre 1 y 48 bytes de UTF-8 válido y entre 1 y 12 caracteres alfanuméricos (de
+// cualquier alfabeto) con al menos una letra. El campo completo debe ser el
+// nombre; cualquier otra cosa lo invalida. Este filtrado estricto evita aceptar
+// coincidencias casuales de bytes como si fueran nombres.
 func exactName(b []byte, off, ln int) (string, bool) {
 	if ln < 1 || ln > 48 || off+ln > len(b) {
 		return "", false
@@ -43,7 +45,7 @@ func exactName(b []byte, off, ln int) (string, bool) {
 	return string(runes), true
 }
 
-// isTutorialName detects the "$abcd" tutorial character placeholder.
+// isTutorialName detecta el marcador de personaje de tutorial "$abcd".
 func isTutorialName(b []byte, off, ln int) bool {
 	if ln < 5 || off+ln > len(b) || b[off] != '$' {
 		return false
@@ -56,7 +58,10 @@ func isTutorialName(b []byte, off, ln int) bool {
 	return true
 }
 
-// parseIdentityAt parses an identity record whose opcode sits at b[i:i+2].
+// parseIdentityAt parsea un registro de identidad cuyo opcode está en b[i:i+2].
+// Los registros propios (self=true) llevan además servidor, clase y nivel. La
+// identidad se vuelca en el modelo de combate, que asocia el id con el nombre y
+// la clase del personaje.
 func (p *Parser) parseIdentityAt(b []byte, i int, self bool) bool {
 	if i+3 >= len(b) {
 		return false
@@ -104,7 +109,7 @@ func (p *Parser) parseIdentityAt(b []byte, i int, self bool) bool {
 		}
 		class := int(binary.LittleEndian.Uint32(b[o:]))
 		o += 4
-		o++ // 1 unknown byte
+		o++ // 1 byte desconocido
 		level := 0
 		if o+4 <= len(b) {
 			level = int(binary.LittleEndian.Uint32(b[o:]))
@@ -116,8 +121,8 @@ func (p *Parser) parseIdentityAt(b []byte, i int, self bool) bool {
 	return true
 }
 
-// scanIdentity searches a byte region for identity records that are not at a
-// frame boundary (they also arrive embedded inside other packets).
+// scanIdentity busca en una región de bytes registros de identidad que no estén
+// en un límite de frame (también llegan embebidos dentro de otros paquetes).
 func (p *Parser) scanIdentity(b []byte, regs [][2]int) {
 	for _, r := range regs {
 		for i := r[0]; i+2 < r[1]; i++ {

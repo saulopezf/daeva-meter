@@ -1,10 +1,13 @@
 package aion2
 
-// ClassName maps a roster class id to its display name and bar colour. Each
-// class occupies a 4-wide id range (spec §6.1):
+// ClassName traduce un id de clase del roster a su nombre visible y al color de
+// su barra en la tabla de DPS. Cada clase ocupa un rango de 4 ids consecutivos
+// (spec §6.1):
 //
 //	5-8 Gladiator, 9-12 Templar, 13-16 Ranger, 17-20 Assassin,
 //	21-24 Elementalist, 25-28 Sorcerer, 29-32 Cleric, 33-36 Chanter.
+//
+// Devuelve ("", "") si el id no corresponde a ninguna clase conocida.
 func ClassName(id int) (string, string) {
 	switch {
 	case id >= 5 && id <= 8:

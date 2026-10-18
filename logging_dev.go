@@ -2,7 +2,7 @@
 
 package main
 
-// sessionLogs enables the per-session packet log. `wails dev` compiles the app
-// with the "dev" build tag, so the log is only written during development and
-// never in a `wails build` release.
+// sessionLogs habilita el log de paquetes por sesión. `wails dev` compila la app
+// con el tag "dev", así que el log solo se escribe en desarrollo y nunca en una
+// compilación de producción hecha con `wails build`.
 const sessionLogs = true

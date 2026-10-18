@@ -1,4 +1,6 @@
-// Mirrors sniffer.Stats / main.CaptureState / aion2.Snapshot from Go.
+// Tipos que replican sniffer.Stats / main.CaptureState / aion2.Snapshot de Go.
+// Deben mantenerse sincronizados con los structs del backend que se serializan
+// a JSON.
 
 export interface Stats {
   devices: number;
@@ -19,7 +21,7 @@ export interface CaptureState {
   logPath: string;
 }
 
-// One row on the DPS board, from aion2.MemberStat.
+// Una fila de la tabla de DPS, procedente de aion2.MemberStat.
 export interface CombatMember {
   id: number;
   name: string;
@@ -32,7 +34,7 @@ export interface CombatMember {
   self: boolean;
 }
 
-// The current encounter, from aion2.Snapshot.
+// El encuentro actual, procedente de aion2.Snapshot.
 export interface CombatSnapshot {
   active: boolean;
   elapsed: number;

@@ -17,7 +17,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// CaptureState is what the frontend gets from CaptureStatus().
+// CaptureState es el estado que el frontend obtiene de CaptureStatus().
 type CaptureState struct {
 	Running bool          `json:"running"`
 	Error   string        `json:"error"`
@@ -25,6 +25,16 @@ type CaptureState struct {
 	LogPath string        `json:"logPath"`
 }
 
+// App es el backend de la aplicación. Coordina el sniffer (captura de red), el
+// parser de protocolo y el modelo de combate, y expone el estado resultante al
+// frontend a través de eventos y métodos públicos.
+//
+// Concurrencia:
+//   - mu protege sn/combatCh/lastErr contra StopCapture y CaptureStatus.
+//   - combat y parser son punteros atómicos: se leen desde los goroutines del
+//     sniffer sin bloquear.
+//   - logMu protege el escritor del log de sesión (varias goroutines de lectura
+//     del sniffer escriben en él mientras un goroutine lo vacía periódicamente).
 type App struct {
 	ctx context.Context
 
@@ -43,26 +53,31 @@ type App struct {
 	capStart  time.Time
 }
 
-// NewApp creates the application struct bound to the Wails frontend.
+// NewApp crea la estructura de la aplicación que se enlaza con el frontend.
 func NewApp() *App {
 	return &App{}
 }
 
+// startup se ejecuta al abrir la ventana: guarda el contexto de Wails (necesario
+// para emitir eventos) y arranca la captura automáticamente.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	a.openSessionLog() // no-op unless built with the dev tag
+	a.openSessionLog() // no hace nada salvo en compilaciones con el tag "dev"
 	if err := a.StartCapture(); err != nil {
 		log.Printf("[app] capture auto-start failed: %v", err)
 	}
 }
 
+// shutdown se ejecuta al cerrar la aplicación: detiene la captura y cierra el
+// log de sesión.
 func (a *App) shutdown(context.Context) {
 	a.StopCapture()
 	a.closeSessionLog()
 }
 
-// StartCapture starts the passive packet capture. No-op if already running.
-// Errors (e.g. Npcap missing) are stored and returned to the UI.
+// StartCapture arranca la captura pasiva de paquetes. No hace nada si ya está en
+// marcha. Cualquier error (p. ej. Npcap no instalado) se guarda para que la
+// interfaz lo muestre.
 func (a *App) StartCapture() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -102,9 +117,11 @@ func (a *App) StartCapture() error {
 	return nil
 }
 
-// onPayload is called by the sniffer for every reassembled chunk. It logs the
-// chunk and feeds server->client bytes into the protocol parser. It must not
-// take a.mu: StopCapture holds it while waiting for the sniffer goroutines.
+// onPayload lo llama el sniffer por cada fragmento reensamblado. Registra el
+// fragmento y entrega los bytes servidor->cliente al parser del protocolo.
+//
+// Importante: no debe tomar a.mu, porque StopCapture retiene ese mutex mientras
+// espera a que terminen los goroutines del sniffer.
 func (a *App) onPayload(streamID int64, dir sniffer.Direction, ts time.Time, b []byte) {
 	a.writePayload(streamID, dir, ts, b)
 	if dir != sniffer.ServerToClient {
@@ -115,7 +132,8 @@ func (a *App) onPayload(streamID int64, dir sniffer.Direction, ts time.Time, b [
 	}
 }
 
-// emitCombat pushes a combat snapshot to the UI twice per second.
+// emitCombat empuja una instantánea del combate a la interfaz dos veces por
+// segundo. Se detiene cuando se cierra el canal stop.
 func (a *App) emitCombat(stop chan struct{}) {
 	t := time.NewTicker(500 * time.Millisecond)
 	defer t.Stop()
@@ -136,7 +154,7 @@ func (a *App) emitCombat(stop chan struct{}) {
 	}
 }
 
-// CombatState returns the current encounter (DPS board) for the frontend.
+// CombatState devuelve el encuentro actual (tabla de DPS) para el frontend.
 func (a *App) CombatState() aion2.Snapshot {
 	if c := a.combat.Load(); c != nil {
 		return c.Snapshot(time.Now())
@@ -144,9 +162,9 @@ func (a *App) CombatState() aion2.Snapshot {
 	return aion2.Snapshot{}
 }
 
-// writePayload appends one reassembled chunk to the session log. Called from
-// the sniffer read goroutines; logMu guards the writer against the periodic
-// flusher and shutdown.
+// writePayload añade un fragmento reensamblado al log de sesión. Lo llaman los
+// goroutines de lectura del sniffer; logMu protege el escritor frente al
+// vaciado periódico del buffer y al cierre en el apagado.
 func (a *App) writePayload(streamID int64, dir sniffer.Direction, ts time.Time, b []byte) {
 	a.logMu.Lock()
 	defer a.logMu.Unlock()
@@ -161,9 +179,10 @@ func (a *App) writePayload(streamID int64, dir sniffer.Direction, ts time.Time, 
 		rel, dir, streamID, len(b), b)
 }
 
-// openSessionLog starts the per-app session log when session logs are enabled
-// (dev builds). It records every reassembled chunk of the session in a single
-// file that survives capture stop/start and is closed only at shutdown.
+// openSessionLog inicia el log de sesión cuando los logs están habilitados
+// (compilaciones de desarrollo). Registra cada fragmento reensamblado de la
+// sesión en un único archivo que sobrevive a paradas/reinicios de la captura y
+// solo se cierra en el apagado.
 func (a *App) openSessionLog() {
 	if !sessionLogs {
 		return
@@ -182,7 +201,7 @@ func (a *App) openSessionLog() {
 	a.emitLogf("session log: %s", path)
 }
 
-// openSessionLogFile creates captures/session-<timestamp>.txt for this run.
+// openSessionLogFile crea captures/session-<timestamp>.txt para esta ejecución.
 func openSessionLogFile() (string, *os.File, *bufio.Writer, error) {
 	dir := "captures"
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -198,8 +217,8 @@ func openSessionLogFile() (string, *os.File, *bufio.Writer, error) {
 	return name, f, w, nil
 }
 
-// flushSessionLog periodically flushes the buffered log so a long session is
-// not lost if the process is killed.
+// flushSessionLog vacía periódicamente el buffer del log para no perder una
+// sesión larga si el proceso se mata.
 func (a *App) flushSessionLog(stop chan struct{}) {
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
@@ -217,6 +236,8 @@ func (a *App) flushSessionLog(stop chan struct{}) {
 	}
 }
 
+// emitLogf escribe un mensaje a la consola y, si hay ventana, lo publica como
+// evento "capture:log" para el frontend.
 func (a *App) emitLogf(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	log.Printf("[app] %s", msg)
@@ -225,8 +246,8 @@ func (a *App) emitLogf(format string, args ...any) {
 	}
 }
 
-// StopCapture stops the capture if running. The session log stays open: it
-// spans the whole app run and is closed only at shutdown.
+// StopCapture detiene la captura si está en marcha. El log de sesión sigue
+// abierto: abarca toda la ejecución de la app y solo se cierra en el apagado.
 func (a *App) StopCapture() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -242,7 +263,7 @@ func (a *App) StopCapture() {
 	a.parser.Store(nil)
 }
 
-// closeSessionLog flushes and closes the session log (called at shutdown).
+// closeSessionLog vacía y cierra el log de sesión (se llama en el apagado).
 func (a *App) closeSessionLog() {
 	if a.logCh != nil {
 		close(a.logCh)
@@ -266,7 +287,7 @@ func (a *App) closeSessionLog() {
 	}
 }
 
-// CaptureStatus returns the current capture status for the UI.
+// CaptureStatus devuelve el estado actual de la captura para la interfaz.
 func (a *App) CaptureStatus() CaptureState {
 	a.mu.Lock()
 	st := CaptureState{Error: a.lastErr}

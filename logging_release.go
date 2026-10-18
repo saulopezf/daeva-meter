@@ -2,5 +2,6 @@
 
 package main
 
-// sessionLogs is off in production builds: no session log file is created.
+// sessionLogs está desactivado en compilaciones de producción: no se crea
+// ningún archivo de log de sesión.
 const sessionLogs = false

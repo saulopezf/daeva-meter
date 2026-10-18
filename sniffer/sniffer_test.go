@@ -7,16 +7,17 @@ import (
 	"time"
 )
 
-// TestCaptureLoopback verifies the full capture pipeline end to end:
-// device open, BPF filter, packet read and TCP reassembly — using loopback
-// traffic on a dedicated test port, so no game client is needed.
-// Requires Npcap; skipped under `go test -short`.
+// TestCaptureLoopback verifica el pipeline de captura completo de extremo a
+// extremo: apertura de dispositivos, filtro BPF, lectura de paquetes y
+// reensamblado TCP — usando tráfico de loopback en un puerto de prueba dedicado,
+// así que no hace falta un cliente del juego. Requiere Npcap; se omite con
+// `go test -short`.
 func TestCaptureLoopback(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping capture test (needs Npcap); run without -short")
 	}
 
-	const testPort = 13329 // not the real game port, avoids clashing with a client
+	const testPort = 13329 // no es el puerto real del juego, evita chocar con un cliente
 
 	s := New(Options{Port: testPort})
 	if err := s.Start(); err != nil {

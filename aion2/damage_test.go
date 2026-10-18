@@ -5,6 +5,7 @@ import (
 	"testing"
 )
 
+// encodeVarint codifica v como varint LEB128 (el inverso de readVarint).
 func encodeVarint(v int) []byte {
 	var out []byte
 	for {
@@ -21,8 +22,8 @@ func encodeVarint(v int) []byte {
 	return out
 }
 
-// buildDamageFrame wraps the given hex (the bytes after the 04 38 opcode) in a
-// frame with a correct leading varint length.
+// buildDamageFrame envuelve el hex dado (los bytes posteriores al opcode 04 38)
+// en un frame con un varint de longitud inicial correcto.
 func buildDamageFrame(t *testing.T, hexBody string) []byte {
 	t.Helper()
 	raw, err := hex.DecodeString(hexBody)
@@ -34,6 +35,9 @@ func buildDamageFrame(t *testing.T, hexBody string) []byte {
 	return append(encodeVarint(L), body...)
 }
 
+// TestDamageVectors comprueba parseDamage contra una tabla de vectores reales
+// capturados del juego: daño total, número y daño de golpes extra, target, actor
+// y habilidad.
 func TestDamageVectors(t *testing.T) {
 	cases := []struct {
 		name      string

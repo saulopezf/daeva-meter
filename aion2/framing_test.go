@@ -8,6 +8,8 @@ import (
 	"github.com/pierrec/lz4/v4"
 )
 
+// buildIdentityFrame construye un frame de identidad sintético (33 36 para self,
+// 45 36 para otro jugador) con los campos opcionales que correspondan.
 func buildIdentityFrame(t *testing.T, id int, name string, self bool) []byte {
 	t.Helper()
 	op := []byte{0x45, 0x36}
@@ -17,7 +19,7 @@ func buildIdentityFrame(t *testing.T, id int, name string, self bool) []byte {
 	body := append([]byte{}, op...)
 	body = append(body, encodeVarint(id)...)
 	body = append(body, 0x11, 0x22, 0x33, 0x44) // mask1
-	body = append(body, 0x01)                   // mask2: name present
+	body = append(body, 0x01)                   // mask2: nombre presente
 	body = append(body, byte(len(name)))
 	body = append(body, []byte(name)...)
 	if self {
@@ -36,6 +38,8 @@ func buildIdentityFrame(t *testing.T, id int, name string, self bool) []byte {
 	return append(encodeVarint(L), body...)
 }
 
+// buildBundleFrame comprime inner y lo envuelve en un frame de bundle
+// (FF FF <tamaño LE> <LZ4>).
 func buildBundleFrame(t *testing.T, inner []byte) []byte {
 	t.Helper()
 	buf := make([]byte, lz4.CompressBlockBound(len(inner)))
@@ -52,6 +56,8 @@ func buildBundleFrame(t *testing.T, inner []byte) []byte {
 	return append(encodeVarint(L), payload...)
 }
 
+// TestVarintRoundTrip comprueba que codificar y decodificar varints es estable en
+// los bordes de anchura.
 func TestVarintRoundTrip(t *testing.T) {
 	for _, v := range []int{0, 1, 5, 63, 64, 127, 128, 300, 16383, 16384, 1 << 20, 1<<31 - 1} {
 		enc := encodeVarint(v)
@@ -62,9 +68,10 @@ func TestVarintRoundTrip(t *testing.T) {
 	}
 }
 
+// TestFrameSizeAroundVarintWidth comprueba que un frame cuya longitud necesita un
+// varint de 2 bytes no se dimensiona mal.
 func TestFrameSizeAroundVarintWidth(t *testing.T) {
-	// A frame whose length needs a 2-byte varint must not be mis-sized.
-	body := make([]byte, 130) // total frame = 1..2 varint + body
+	body := make([]byte, 130) // frame total = varint de 1..2 bytes + body
 	body[0], body[1] = 0x06, 0x38
 	frame := append(encodeVarint(len(body)+4), body...)
 	frames, consumed := walk(frame)
@@ -76,10 +83,12 @@ func TestFrameSizeAroundVarintWidth(t *testing.T) {
 	}
 }
 
+// TestWalkSkipsTLSAndPadding comprueba que walk ignora el relleno 0x00 y los
+// registros TLS y aun así encuentra la identidad que va detrás.
 func TestWalkSkipsTLSAndPadding(t *testing.T) {
 	inner := buildIdentityFrame(t, 1234, "Tester", true)
 	stream := []byte{0x00, 0x00}
-	// TLS record header (type 0x16, ver 0x0303) with 8 payload bytes.
+	// Cabecera de registro TLS (tipo 0x16, versión 0x0303) con 8 bytes de payload.
 	tls := []byte{0x16, 0x03, 0x03, 0x00, 0x08, 1, 2, 3, 4, 5, 6, 7, 8}
 	stream = append(stream, tls...)
 	stream = append(stream, inner...)
@@ -95,6 +104,8 @@ func TestWalkSkipsTLSAndPadding(t *testing.T) {
 	}
 }
 
+// TestChunkedStream verifica que un stream partido en trozos de distinto tamaño
+// se reensambla y parsea igual que si llegara de una vez.
 func TestChunkedStream(t *testing.T) {
 	var stream []byte
 	stream = append(stream, buildIdentityFrame(t, 1395, "Alpha", false)...)
@@ -122,6 +133,8 @@ func TestChunkedStream(t *testing.T) {
 	}
 }
 
+// TestBundleUnwrap verifica que un frame de bundle se descomprime y que la
+// identidad que contiene se parsea.
 func TestBundleUnwrap(t *testing.T) {
 	inner := buildIdentityFrame(t, 9999, "Bundled", true)
 	bundle := buildBundleFrame(t, inner)
