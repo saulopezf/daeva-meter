@@ -80,6 +80,19 @@ export default function App() {
     };
   }, [refresh, pushLog]);
 
+  // openMember abre (o enfoca) la ventana de desglose del miembro pulsado.
+  const openMember = useCallback(
+    async (member: CombatMember) => {
+      if (!member.key) return;
+      try {
+        await Backend.OpenMemberWindow(member.key, member.name);
+      } catch (e) {
+        pushLog(String(e));
+      }
+    },
+    [pushLog],
+  );
+
   // toggle arranca o detiene la captura según el estado actual.
   const toggle = useCallback(async () => {
     setBusy(true);
@@ -135,7 +148,9 @@ export default function App() {
       {state?.error && <div className="error">{state.error}</div>}
 
       <div className="section-label">
-        <span>Party DPS</span>
+        <span>
+          Party DPS <small className="hint">click a row for skills</small>
+        </span>
         <span className={combat.active ? 'live-tag' : 'mock'}>
           {combat.active
             ? `FIGHT ${combat.elapsed.toFixed(0)}s`
@@ -150,7 +165,13 @@ export default function App() {
           <div className="empty">waiting for combat data…</div>
         ) : (
           members.map((m, i) => (
-            <DpsBar key={m.id} member={m} rank={i + 1} maxDps={maxDps} />
+            <DpsBar
+              key={m.key}
+              member={m}
+              rank={i + 1}
+              maxDps={maxDps}
+              onSelect={(member) => void openMember(member)}
+            />
           ))
         )}
       </main>

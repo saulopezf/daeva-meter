@@ -24,6 +24,7 @@ export interface CaptureState {
 // Una fila de la tabla de DPS, procedente de aion2.MemberStat.
 export interface CombatMember {
   id: number;
+  key: string;
   name: string;
   class: string;
   color: string;
@@ -32,6 +33,39 @@ export interface CombatMember {
   hits: number;
   crits: number;
   self: boolean;
+}
+
+// El desglose de una habilidad, procedente de aion2.SkillStat.
+export interface SkillStat {
+  id: number;
+  name: string;
+  damage: number;
+  dps: number;
+  share: number;
+  hits: number;
+  extraHits: number;
+  totalHits: number;
+  crits: number;
+  avgHit: number;
+}
+
+// El detalle de un miembro, procedente de aion2.MemberDetail.
+export interface MemberDetail {
+  key: string;
+  name: string;
+  class: string;
+  color: string;
+  self: boolean;
+  found: boolean;
+  active: boolean;
+  elapsed: number;
+  damage: number;
+  dps: number;
+  hits: number;
+  extraHits: number;
+  totalHits: number;
+  crits: number;
+  skills: SkillStat[] | null;
 }
 
 // El encuentro actual, procedente de aion2.Snapshot.

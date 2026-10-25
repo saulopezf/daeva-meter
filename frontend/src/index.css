@@ -170,6 +170,28 @@ header {
   gap: 9px;
 }
 
+.hint {
+  color: #667085;
+  font-size: 9px;
+  letter-spacing: 0;
+  text-transform: none;
+  margin-left: 6px;
+}
+
+.row.clickable {
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 4px 6px;
+  margin: -4px -6px;
+  transition: background 0.15s ease;
+}
+
+.row.clickable:hover,
+.row.clickable:focus-visible {
+  background: #1a2233;
+  outline: none;
+}
+
 .row-top {
   display: flex;
   align-items: baseline;
@@ -257,4 +279,127 @@ footer {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Ventana de desglose por habilidad. */
+
+.detail-head {
+  display: block;
+  padding: 12px 14px 10px;
+}
+
+.detail-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.detail-title .name {
+  font-size: 16px;
+}
+
+.detail-title .live-tag,
+.detail-title .mock {
+  margin-left: auto;
+}
+
+.detail-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.detail-stat {
+  min-width: 0;
+  padding: 5px 7px;
+  background: #111827;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.detail-stat .label {
+  display: block;
+  color: var(--dim);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.detail-stat .value {
+  display: block;
+  font: 600 13px var(--mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.detail-stat .value small {
+  margin-left: 3px;
+  color: var(--dim);
+  font-size: 9px;
+  font-weight: 400;
+}
+
+.detail-banner {
+  padding: 6px 12px;
+  background: #3b2f10;
+  border-bottom: 1px solid #584616;
+  color: #f5b942;
+  font-size: 11px;
+}
+
+.detail-main {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 14px 12px;
+}
+
+.skill-row {
+  padding: 9px 0;
+  border-bottom: 1px solid #1c2434;
+}
+
+.skill-row:last-child {
+  border-bottom: none;
+}
+
+.skill-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.skill-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-damage {
+  font: 600 13px var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.skill-share {
+  width: 52px;
+  text-align: right;
+  color: var(--dim);
+  font: 11px var(--mono);
+}
+
+.skill-track {
+  height: 7px;
+  margin: 5px 0 4px;
+}
+
+.skill-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--dim);
+  font: 11px var(--mono);
 }

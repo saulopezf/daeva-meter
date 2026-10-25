@@ -14,6 +14,7 @@ import (
 	"daeva-meter/sniffer"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 // assets contiene el frontend ya compilado (frontend/dist) embebido en el
@@ -55,12 +56,28 @@ func main() {
 	// de app.Run(), de modo que ServiceStartup ya puede usarla.
 	backend.app = app
 
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
+	mainWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:             "main",
 		Title:            "daeva-meter",
 		Width:            480,
 		Height:           420,
 		BackgroundColour: application.NewRGB(27, 38, 54),
 		URL:              "/",
+	})
+	// Al cerrar la ventana principal se cierran también las ventanas de detalle.
+	//
+	// No llamamos a app.Quit() aquí: Quit destruye el bucle de mensajes mientras
+	// las ventanas (y sus WebView2) todavía no han terminado de cerrarse, lo que
+	// hace que el proceso salga con ventanas vivas y WebView2 falle al
+	// desregistrar su clase ("Failed to unregister class Chrome_WidgetWin_0.
+	// Error = 1412"). Dejamos que Wails cierre la ventana principal y que
+	// termine la aplicación cuando se destruya el último HWND.
+	mainWindow.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) {
+		for _, win := range app.Window.GetAll() {
+			if win.ID() != mainWindow.ID() {
+				win.Close()
+			}
+		}
 	})
 
 	if err := app.Run(); err != nil {

@@ -12,6 +12,7 @@
  *     sniffer sin bloquear.
  *   - logMu protege el escritor del log de sesión (varias goroutines de lectura
  *     del sniffer escriben en él mientras un goroutine lo vacía periódicamente).
+ *   - winMu serializa la creación de ventanas de detalle.
  * @module
  */
 
@@ -39,6 +40,21 @@ export function CaptureStatus(): $CancellablePromise<$models.CaptureState> {
  */
 export function CombatState(): $CancellablePromise<aion2$0.Snapshot> {
     return $Call.ByID(3140286890);
+}
+
+/**
+ * MemberDetail devuelve el desglose por habilidad de una fila de la tabla.
+ */
+export function MemberDetail(key: string): $CancellablePromise<aion2$0.MemberDetail> {
+    return $Call.ByID(292369370, key);
+}
+
+/**
+ * OpenMemberWindow abre la ventana de detalle de un miembro. Si ya existe una
+ * ventana para ese miembro, la enfoca en lugar de crear otra.
+ */
+export function OpenMemberWindow(key: string, name: string): $CancellablePromise<void> {
+    return $Call.ByID(3234408239, key, name);
 }
 
 /**

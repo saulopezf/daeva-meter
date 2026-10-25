@@ -42,6 +42,7 @@ type Hit struct {
 // MemberStat es el daño agregado por actor tal y como aparece en la tabla de DPS.
 type MemberStat struct {
 	ID     int     `json:"id"`
+	Key    string  `json:"key"`
 	Name   string  `json:"name"`
 	Class  string  `json:"class"`
 	Color  string  `json:"color"`
@@ -50,6 +51,43 @@ type MemberStat struct {
 	Hits   int     `json:"hits"`
 	Crits  int     `json:"crits"`
 	Self   bool    `json:"self"`
+}
+
+// SkillStat es el daño agregado de una habilidad concreta para un miembro.
+//
+// Hits cuenta eventos de daño (coincide con MemberStat.Hits). ExtraHits son los
+// golpes adicionales que el protocolo agrupa dentro de un mismo evento; TotalHits
+// es la suma de ambos y es lo que se muestra como "golpes" en la interfaz.
+type SkillStat struct {
+	ID        int     `json:"id"`
+	Name      string  `json:"name"`
+	Damage    int64   `json:"damage"`
+	DPS       float64 `json:"dps"`
+	Share     float64 `json:"share"`
+	Hits      int     `json:"hits"`
+	ExtraHits int     `json:"extraHits"`
+	TotalHits int     `json:"totalHits"`
+	Crits     int     `json:"crits"`
+	AvgHit    float64 `json:"avgHit"`
+}
+
+// MemberDetail es el desglose por habilidad de un miembro del encuentro actual.
+type MemberDetail struct {
+	Key       string      `json:"key"`
+	Name      string      `json:"name"`
+	Class     string      `json:"class"`
+	Color     string      `json:"color"`
+	Self      bool        `json:"self"`
+	Found     bool        `json:"found"`
+	Active    bool        `json:"active"`
+	Elapsed   float64     `json:"elapsed"`
+	Damage    int64       `json:"damage"`
+	DPS       float64     `json:"dps"`
+	Hits      int         `json:"hits"`
+	ExtraHits int         `json:"extraHits"`
+	TotalHits int         `json:"totalHits"`
+	Crits     int         `json:"crits"`
+	Skills    []SkillStat `json:"skills"`
 }
 
 // Snapshot es el estado de combate listo para serializar a JSON y enviar al
@@ -63,20 +101,52 @@ type Snapshot struct {
 	Party   []string     `json:"party"`
 }
 
+// hitKey identifica un golpe dentro del encuentro. Se guarda también el target
+// para poder añadir en el futuro el desglose de daño por enemigo sin tocar el
+// parser ni el modelo de eventos.
+type hitKey struct {
+	actor  int
+	skill  int
+	target int
+}
+
+// hitAcc acumula los datos de uno o varios golpes.
+type hitAcc struct {
+	damage    int64
+	hits      int
+	crits     int
+	extraHits int
+}
+
+// add suma otro acumulador.
+func (a *hitAcc) add(b *hitAcc) {
+	a.damage += b.damage
+	a.hits += b.hits
+	a.crits += b.crits
+	a.extraHits += b.extraHits
+}
+
 // encounter es una pelea: daño acumulado por actor más su ventana temporal.
 type encounter struct {
-	start  time.Time
-	last   time.Time
+	start time.Time
+	last  time.Time
+
 	damage map[int]int64
 	hits   map[int]int
 	crits  map[int]int
+
+	// breakdown conserva el detalle por actor, habilidad y objetivo. Es la base
+	// del desglose por habilidad y, en una segunda iteración, del desglose por
+	// enemigo.
+	breakdown map[hitKey]*hitAcc
 }
 
 func newEncounter() *encounter {
 	return &encounter{
-		damage: map[int]int64{},
-		hits:   map[int]int{},
-		crits:  map[int]int{},
+		damage:    map[int]int64{},
+		hits:      map[int]int{},
+		crits:     map[int]int{},
+		breakdown: map[hitKey]*hitAcc{},
 	}
 }
 
@@ -334,6 +404,20 @@ func (c *Combat) AddHit(ts time.Time, h Hit) {
 	if h.Crit {
 		c.cur.crits[h.Actor]++
 	}
+
+	key := hitKey{actor: h.Actor, skill: h.Skill, target: h.Target}
+	acc := c.cur.breakdown[key]
+	if acc == nil {
+		acc = &hitAcc{}
+		c.cur.breakdown[key] = acc
+	}
+	acc.damage += int64(total)
+	acc.hits++
+	if h.Crit {
+		acc.crits++
+	}
+	acc.extraHits += h.ExtraHits
+
 	if c.cur.start.IsZero() {
 		c.cur.start = ts
 	}
@@ -368,22 +452,145 @@ func (c *Combat) Snapshot(now time.Time) Snapshot {
 	}
 	sort.Strings(snap.Party)
 
-	enc := c.cur
+	rows, enc, active, elapsed := c.rowsLocked(now)
 	if enc == nil {
 		return snap
 	}
-	snap.Active = now.Sub(enc.last) < idleTimeout
-	snap.Elapsed = enc.last.Sub(enc.start).Seconds()
-	if snap.Elapsed < 0.001 {
-		snap.Elapsed = 0.001
+	snap.Active = active
+	snap.Elapsed = elapsed
+	for _, r := range rows {
+		cls, color := ClassName(r.class)
+		if cls == "" {
+			cls = "?"
+		}
+		snap.Members = append(snap.Members, MemberStat{
+			ID:     r.id,
+			Key:    r.key,
+			Name:   r.name,
+			Class:  cls,
+			Color:  color,
+			Damage: r.damage,
+			DPS:    float64(r.damage) / snap.Elapsed,
+			Hits:   r.hits,
+			Crits:  r.crits,
+			Self:   r.self,
+		})
 	}
+	sort.Slice(snap.Members, func(i, j int) bool {
+		if snap.Members[i].Damage != snap.Members[j].Damage {
+			return snap.Members[i].Damage > snap.Members[j].Damage
+		}
+		return snap.Members[i].Name < snap.Members[j].Name
+	})
+	return snap
+}
+
+// MemberDetail devuelve el desglose por habilidad de la fila canónica key. Si el
+// encuentro no existe o la fila no está presente, Found es false.
+func (c *Combat) MemberDetail(now time.Time, key string) MemberDetail {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	detail := MemberDetail{
+		Key:    key,
+		Active: false,
+		Skills: make([]SkillStat, 0),
+	}
+	rows, enc, active, elapsed := c.rowsLocked(now)
+	if enc == nil {
+		return detail
+	}
+	detail.Active = active
+	detail.Elapsed = elapsed
+
+	r := rows[key]
+	if r == nil {
+		return detail
+	}
+	detail.Found = true
+	detail.Name = r.name
+	detail.Class, detail.Color = ClassName(r.class)
+	if detail.Class == "" {
+		detail.Class = "?"
+	}
+	detail.Self = r.self
+	detail.Damage = r.damage
+	detail.DPS = float64(r.damage) / elapsed
+	detail.Hits = r.hits
+	detail.Crits = r.crits
+
+	bySkill := map[int]*hitAcc{}
+	for hk, acc := range enc.breakdown {
+		actorKey, _ := c.actorKeyLocked(c.entities[hk.actor], hk.actor)
+		if actorKey != key {
+			continue
+		}
+		dst := bySkill[hk.skill]
+		if dst == nil {
+			dst = &hitAcc{}
+			bySkill[hk.skill] = dst
+		}
+		dst.add(acc)
+	}
+
+	detail.Skills = make([]SkillStat, 0, len(bySkill))
+	for id, acc := range bySkill {
+		share := 0.0
+		if r.damage > 0 {
+			share = float64(acc.damage) / float64(r.damage) * 100
+		}
+		totalHits := acc.hits + acc.extraHits
+		avgHit := 0.0
+		if totalHits > 0 {
+			avgHit = float64(acc.damage) / float64(totalHits)
+		}
+		detail.ExtraHits += acc.extraHits
+		detail.TotalHits += totalHits
+		detail.Skills = append(detail.Skills, SkillStat{
+			ID:        id,
+			Name:      SkillName(id),
+			Damage:    acc.damage,
+			DPS:       float64(acc.damage) / elapsed,
+			Share:     share,
+			Hits:      acc.hits,
+			ExtraHits: acc.extraHits,
+			TotalHits: totalHits,
+			Crits:     acc.crits,
+			AvgHit:    avgHit,
+		})
+	}
+	sort.Slice(detail.Skills, func(i, j int) bool {
+		if detail.Skills[i].Damage != detail.Skills[j].Damage {
+			return detail.Skills[i].Damage > detail.Skills[j].Damage
+		}
+		if detail.Skills[i].Name != detail.Skills[j].Name {
+			return detail.Skills[i].Name < detail.Skills[j].Name
+		}
+		return detail.Skills[i].ID < detail.Skills[j].ID
+	})
+	return detail
+}
+
+// rowsLocked agrega el encuentro actual por nombre canónico y devuelve también
+// la ventana temporal usada para DPS. Requiere c.mu.
+func (c *Combat) rowsLocked(now time.Time) (map[string]*aggRow, *encounter, bool, float64) {
+	enc := c.cur
+	if enc == nil {
+		return nil, nil, false, 0
+	}
+	active := now.Sub(enc.last) < idleTimeout
+	elapsed := enc.last.Sub(enc.start).Seconds()
+	if elapsed < 0.001 {
+		elapsed = 0.001
+	}
+
 	rows := map[string]*aggRow{}
 	for id, dmg := range enc.damage {
 		e := c.entities[id]
 		key, name := c.actorKeyLocked(e, id)
 		r := rows[key]
 		if r == nil {
-			r = &aggRow{id: id, name: name}
+			r = &aggRow{key: key, id: id, name: name}
 			rows[key] = r
 		}
 		r.damage += dmg
@@ -407,35 +614,13 @@ func (c *Combat) Snapshot(now time.Time) Snapshot {
 			r.class = e.Class
 		}
 	}
-	for _, r := range rows {
-		cls, color := ClassName(r.class)
-		if cls == "" {
-			cls = "?"
-		}
-		snap.Members = append(snap.Members, MemberStat{
-			ID:     r.id,
-			Name:   r.name,
-			Class:  cls,
-			Color:  color,
-			Damage: r.damage,
-			DPS:    float64(r.damage) / snap.Elapsed,
-			Hits:   r.hits,
-			Crits:  r.crits,
-			Self:   r.self,
-		})
-	}
-	sort.Slice(snap.Members, func(i, j int) bool {
-		if snap.Members[i].Damage != snap.Members[j].Damage {
-			return snap.Members[i].Damage > snap.Members[j].Damage
-		}
-		return snap.Members[i].Name < snap.Members[j].Name
-	})
-	return snap
+	return rows, enc, active, elapsed
 }
 
 // aggRow acumula el daño de todas las entidades que resuelven al mismo nombre
 // canónico de jugador.
 type aggRow struct {
+	key    string
 	id     int
 	name   string
 	class  int

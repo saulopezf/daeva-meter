@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"hash/fnv"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -35,6 +37,7 @@ type CaptureState struct {
 //     sniffer sin bloquear.
 //   - logMu protege el escritor del log de sesión (varias goroutines de lectura
 //     del sniffer escriben en él mientras un goroutine lo vacía periódicamente).
+//   - winMu serializa la creación de ventanas de detalle.
 type App struct {
 	app *application.App
 
@@ -44,6 +47,10 @@ type App struct {
 	parser   atomic.Pointer[aion2.Parser]
 	combatCh chan struct{}
 	lastErr  string
+
+	// winMu serializa la creación de ventanas de detalle para que dos clics
+	// rápidos sobre el mismo miembro no abran ventanas duplicadas.
+	winMu sync.Mutex
 
 	logMu     sync.Mutex
 	logFile   *bufio.Writer
@@ -163,6 +170,60 @@ func (a *App) CombatState() aion2.Snapshot {
 		return c.Snapshot(time.Now())
 	}
 	return aion2.Snapshot{}
+}
+
+// MemberDetail devuelve el desglose por habilidad de una fila de la tabla.
+func (a *App) MemberDetail(key string) aion2.MemberDetail {
+	if c := a.combat.Load(); c != nil {
+		return c.MemberDetail(time.Now(), key)
+	}
+	return aion2.MemberDetail{Key: key, Skills: []aion2.SkillStat{}}
+}
+
+// OpenMemberWindow abre la ventana de detalle de un miembro. Si ya existe una
+// ventana para ese miembro, la enfoca en lugar de crear otra.
+func (a *App) OpenMemberWindow(key, name string) {
+	if a.app == nil || key == "" {
+		return
+	}
+
+	a.winMu.Lock()
+	defer a.winMu.Unlock()
+
+	title := "daeva-meter"
+	if name != "" {
+		title += " — " + name
+	}
+	windowName := detailWindowName(key)
+	if win, ok := a.app.Window.GetByName(windowName); ok {
+		win.SetTitle(title)
+		win.Show()
+		win.Focus()
+		return
+	}
+
+	target := "/?member=" + url.QueryEscape(key)
+	if name != "" {
+		target += "&name=" + url.QueryEscape(name)
+	}
+	a.app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:             windowName,
+		Title:            title,
+		Width:            680,
+		Height:           520,
+		MinWidth:         560,
+		MinHeight:        360,
+		BackgroundColour: application.NewRGB(27, 38, 54),
+		URL:              target,
+	})
+}
+
+// detailWindowName genera un nombre estable y seguro para la ventana de detalle
+// a partir de la clave del miembro.
+func detailWindowName(key string) string {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(key))
+	return fmt.Sprintf("detail-%08x", h.Sum32())
 }
 
 // writePayload añade un fragmento reensamblado al log de sesión. Lo llaman los

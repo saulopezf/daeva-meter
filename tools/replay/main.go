@@ -103,4 +103,18 @@ func main() {
 	for _, m := range snap.Members {
 		fmt.Printf("  %-14s %-12s %10d %10.0f %6d %6d\n", m.Name, m.Class, m.Damage, m.DPS, m.Hits, m.Crits)
 	}
+
+	fmt.Println("\n-- skill breakdown --")
+	for _, m := range snap.Members {
+		md := combat.MemberDetail(now, m.Key)
+		fmt.Printf("\n  %s (%d damage)\n", m.Name, md.Damage)
+		for _, s := range md.Skills {
+			name := s.Name
+			if name == "" {
+				name = fmt.Sprintf("Skill #%d", s.ID)
+			}
+			fmt.Printf("    %-26s %9d %5.1f%% %6d hits %4d extra %4d crits %8.0f dps\n",
+				name, s.Damage, s.Share, s.Hits, s.ExtraHits, s.Crits, s.DPS)
+		}
+	}
 }

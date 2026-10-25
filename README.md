@@ -7,13 +7,17 @@ el daño de tu grupo, sin tocar ni modificar el juego.
 
 - Detecta automáticamente a tu personaje y a los miembros de tu grupo.
 - Muestra una tabla de daño en tiempo real: DPS, daño total, golpes y críticos.
+- Pulsa una fila para abrir el desglose por habilidad: daño, porcentaje del total,
+  DPS, golpes, críticos y daño medio de cada habilidad.
 - Suma el daño de mascotas y hechizos de suelo a quien los lanza.
 
 La captura es **pasiva**: la app solo observa el tráfico de red del juego, no
 interactúa con él ni necesita modificarlo.
 
-> **Estado:** versión inicial. Por ahora solo mide **daño infligido**. Próximamente
-> se añadirán daño por habilidad, modo curación y daño recibido.
+> **Estado:** versión inicial. Por ahora mide **daño infligido** y su desglose por
+> habilidad. Las habilidades se muestran como `Skill #<id>` hasta que se añadan
+> nombres. Próximamente se añadirán modo curación, daño recibido y desglose por
+> enemigo.
 
 ## Qué necesitas
 
@@ -43,6 +47,9 @@ interactúa con él ni necesita modificarlo.
   - `dps` → daño por segundo.
   - el número de la derecha → daño total.
   - `YOU` marca tu propia fila.
+  - **Pulsa una fila** para abrir una ventana con el desglose por habilidad. La
+    ventana se actualiza en vivo y se reutiliza si vuelves a pulsar el mismo
+    jugador.
 - **Pie de la ventana**: contadores de red y el último mensaje de estado.
 
 ## Si no funciona
@@ -55,11 +62,45 @@ interactúa con él ni necesita modificarlo.
 - **No aparezco en la tabla:** tu personaje se detecta al entrar en combate.
   Espera a golpear o recibir daño.
 
+## Catálogo de habilidades
+
+El protocolo solo proporciona el id numérico de la habilidad, así que la
+interfaz muestra `Skill #<id>` cuando no hay datos. Los nombres y metadatos están
+en `aion2/skill_catalog.json`, que se embebe en el ejecutable:
+
+```json
+{
+  "version": 1,
+  "skills": [
+    {
+      "id": 16040000,
+      "name": "Combustion",
+      "icon": "icons/16040000.png",
+      "class": "Elementalist",
+      "type": "active",
+      "description": "Opcional"
+    }
+  ]
+}
+```
+
+Solo `id` y `name` son obligatorios. `icon`, `class`, `type` y `description`
+están reservados para metadatos futuros; por ahora la interfaz solo usa el
+nombre. Los ids que no estén en el catálogo se muestran como `Skill #<id>`.
+
+El JSON se parsea una sola vez al arrancar y se guarda en un mapa en memoria.
+Las entradas inválidas o duplicadas se ignoran y se registran en el log; el resto
+sigue funcionando. Un id duplicado se queda con la última entrada.
+
+> El catálogo va embebido en el `.exe`. Después de editarlo hay que recompilar
+> para que los cambios lleguen a la aplicación. Si más adelante quieres editar
+> nombres sin recompilar, se puede añadir un override externo.
+
 ## Próximas mejoras
 
-- Daño desglosado por habilidad.
 - Modo curación.
 - Daño recibido.
+- Daño desglosado por enemigo (el acumulador interno ya guarda el objetivo).
 - Historial de peleas (no solo la pelea actual).
 
 ## Para desarrolladores
