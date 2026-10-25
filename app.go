@@ -14,7 +14,7 @@ import (
 	"daeva-meter/aion2"
 	"daeva-meter/sniffer"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // CaptureState es el estado que el frontend obtiene de CaptureStatus().
@@ -36,7 +36,7 @@ type CaptureState struct {
 //   - logMu protege el escritor del log de sesión (varias goroutines de lectura
 //     del sniffer escriben en él mientras un goroutine lo vacía periódicamente).
 type App struct {
-	ctx context.Context
+	app *application.App
 
 	mu       sync.Mutex
 	sn       *sniffer.Sniffer
@@ -58,21 +58,31 @@ func NewApp() *App {
 	return &App{}
 }
 
-// startup se ejecuta al abrir la ventana: guarda el contexto de Wails (necesario
-// para emitir eventos) y arranca la captura automáticamente.
-func (a *App) startup(ctx context.Context) {
-	a.ctx = ctx
-	a.openSessionLog() // no hace nada salvo en compilaciones con el tag "dev"
-	if err := a.StartCapture(); err != nil {
-		log.Printf("[app] capture auto-start failed: %v", err)
+// emit publica un evento hacia el frontend. Es seguro llamarlo desde los
+// goroutines del sniffer: app se asigna antes de arrancar la aplicación y el
+// emisor de eventos de Wails es concurrente.
+func (a *App) emit(name string, data any) {
+	if a.app != nil {
+		a.app.Event.Emit(name, data)
 	}
 }
 
-// shutdown se ejecuta al cerrar la aplicación: detiene la captura y cierra el
-// log de sesión.
-func (a *App) shutdown(context.Context) {
+// ServiceStartup se ejecuta al arrancar la aplicación: abre el log de sesión (si
+// está habilitado) y arranca la captura automáticamente.
+func (a *App) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
+	a.openSessionLog() // no hace nada salvo en compilaciones de desarrollo
+	if err := a.StartCapture(); err != nil {
+		log.Printf("[app] capture auto-start failed: %v", err)
+	}
+	return nil
+}
+
+// ServiceShutdown se ejecuta al cerrar la aplicación: detiene la captura y
+// cierra el log de sesión.
+func (a *App) ServiceShutdown() error {
 	a.StopCapture()
 	a.closeSessionLog()
+	return nil
 }
 
 // StartCapture arranca la captura pasiva de paquetes. No hace nada si ya está en
@@ -92,14 +102,10 @@ func (a *App) StartCapture() error {
 		Port:    sniffer.DefaultPort,
 		Console: true,
 		OnStats: func(st sniffer.Stats) {
-			if a.ctx != nil {
-				runtime.EventsEmit(a.ctx, "capture:stats", st)
-			}
+			a.emit("capture:stats", st)
 		},
 		OnLog: func(msg string) {
-			if a.ctx != nil {
-				runtime.EventsEmit(a.ctx, "capture:log", msg)
-			}
+			a.emit("capture:log", msg)
 		},
 		OnPayload: a.onPayload,
 	})
@@ -142,14 +148,11 @@ func (a *App) emitCombat(stop chan struct{}) {
 		case <-stop:
 			return
 		case <-t.C:
-			if a.ctx == nil {
-				continue
-			}
 			c := a.combat.Load()
 			if c == nil {
 				continue
 			}
-			runtime.EventsEmit(a.ctx, "combat:update", c.Snapshot(time.Now()))
+			a.emit("combat:update", c.Snapshot(time.Now()))
 		}
 	}
 }
@@ -241,9 +244,7 @@ func (a *App) flushSessionLog(stop chan struct{}) {
 func (a *App) emitLogf(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	log.Printf("[app] %s", msg)
-	if a.ctx != nil {
-		runtime.EventsEmit(a.ctx, "capture:log", msg)
-	}
+	a.emit("capture:log", msg)
 }
 
 // StopCapture detiene la captura si está en marcha. El log de sesión sigue

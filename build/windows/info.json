@@ -1,15 +1,15 @@
 {
 	"fixed": {
-		"file_version": "{{.Info.ProductVersion}}"
+		"file_version": "0.1.0"
 	},
 	"info": {
-		"0000": {
-			"ProductVersion": "{{.Info.ProductVersion}}",
-			"CompanyName": "{{.Info.CompanyName}}",
-			"FileDescription": "{{.Info.ProductName}}",
-			"LegalCopyright": "{{.Info.Copyright}}",
-			"ProductName": "{{.Info.ProductName}}",
-			"Comments": "{{.Info.Comments}}"
+		"0409": {
+			"ProductVersion": "0.1.0",
+			"CompanyName": "saulopezf",
+			"FileDescription": "Medidor de DPS para Aion 2",
+			"LegalCopyright": "(c) 2026, saulopezf",
+			"ProductName": "daeva-meter",
+			"Comments": "Medidor de DPS pasivo para Aion 2"
 		}
 	}
 }

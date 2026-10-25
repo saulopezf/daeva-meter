@@ -20,7 +20,8 @@ interactúa con él ni necesita modificarlo.
 - Windows 10/11.
 - **[Npcap](https://npcap.com)** instalado (es lo que permite leer el tráfico de
   red). Es un requisito obligatorio.
-- El ejecutable `daeva-meter.exe`.
+- El ejecutable `daeva-meter.exe`. No está firmado digitalmente, así que Windows
+  SmartScreen puede mostrar un aviso la primera vez.
 
 ## Cómo usarlo
 
@@ -63,10 +64,32 @@ interactúa con él ni necesita modificarlo.
 
 ## Para desarrolladores
 
-El proyecto se compila con [Wails](https://wails.io) (backend Go + frontend React).
+El proyecto se compila con [Wails v3](https://v3.wails.io) (backend Go + frontend
+React). Requiere Go 1.26+ y Node.js.
+
+Instala el CLI de Wails v3 (es un binario distinto de `wails` v2):
 
 ```bash
-wails dev      # desarrollo con recarga en caliente
-wails build    # genera el ejecutable en build/bin/
-go test ./...  # tests del backend
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.34
 ```
+
+Comandos habituales:
+
+```bash
+wails3 dev                  # desarrollo con recarga en caliente
+wails3 build                # genera bin/daeva-meter.exe para distribuir
+wails3 generate bindings -ts -i  # regenera frontend/bindings desde los servicios Go
+go test ./...               # tests del backend
+```
+
+Para distribuir la versión estable solo hay que compartir `bin/daeva-meter.exe`.
+No se genera instalador.
+
+La primera vez (o tras cambiar dependencias del frontend):
+
+```bash
+cd frontend && npm install
+```
+
+Los bindings generados se guardan en `frontend/bindings/` y el build de
+producción usa el tag `production` (desactiva el log de sesión).

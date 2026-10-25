@@ -1,8 +1,9 @@
-//go:build dev
+//go:build !production
 
 package main
 
-// sessionLogs habilita el log de paquetes por sesión. `wails dev` compila la app
-// con el tag "dev", así que el log solo se escribe en desarrollo y nunca en una
-// compilación de producción hecha con `wails build`.
+// sessionLogs habilita el log de paquetes por sesión en compilaciones de
+// desarrollo. Wails v3 compila en modo desarrollo sin el tag "production" y en
+// producción con `-tags production`, así que el log nunca se escribe en una
+// compilación de release.
 const sessionLogs = true

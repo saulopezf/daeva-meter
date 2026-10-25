@@ -1,6 +1,6 @@
-// Tipos que replican sniffer.Stats / main.CaptureState / aion2.Snapshot de Go.
-// Deben mantenerse sincronizados con los structs del backend que se serializan
-// a JSON.
+// Tipos de la interfaz. Los modelos equivalentes del backend se generan en
+// frontend/bindings/daeva-meter/; se mantienen aquí para no acoplar la UI a los
+// bindings generados.
 
 export interface Stats {
   devices: number;

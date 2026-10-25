@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { CaptureStatus, CombatState, StartCapture, StopCapture } from '../wailsjs/go/main/App';
-import { EventsOff, EventsOn } from '../wailsjs/runtime/runtime';
+import { Events } from '@wailsio/runtime';
+import { App as Backend } from '../bindings/daeva-meter';
 import { DpsBar } from './components/DpsBar';
 import { fmtCompact } from './format';
 import type { CaptureState, CombatSnapshot, CombatMember, Stats } from './types';
@@ -56,10 +56,10 @@ export default function App() {
   // refresh trae el estado completo del backend (captura + combate) bajo demanda.
   const refresh = useCallback(async () => {
     try {
-      const s = await CaptureStatus();
+      const s = await Backend.CaptureStatus();
       setState(s);
       setStats(s.stats);
-      setCombat(await CombatState());
+      setCombat(await Backend.CombatState());
     } catch (e) {
       pushLog(String(e));
     }
@@ -70,13 +70,13 @@ export default function App() {
   // refresca en vivo sin polling.
   useEffect(() => {
     void refresh();
-    EventsOn('capture:stats', (st: Stats) => setStats(st));
-    EventsOn('capture:log', (msg: string) => pushLog(msg));
-    EventsOn('combat:update', (snap: CombatSnapshot) => setCombat(snap));
+    const offStats = Events.On('capture:stats', (ev) => setStats(ev.data as Stats));
+    const offLog = Events.On('capture:log', (ev) => pushLog(ev.data as string));
+    const offCombat = Events.On('combat:update', (ev) => setCombat(ev.data as CombatSnapshot));
     return () => {
-      EventsOff('capture:stats');
-      EventsOff('capture:log');
-      EventsOff('combat:update');
+      offStats();
+      offLog();
+      offCombat();
     };
   }, [refresh, pushLog]);
 
@@ -85,9 +85,9 @@ export default function App() {
     setBusy(true);
     try {
       if (state?.running) {
-        StopCapture();
+        await Backend.StopCapture();
       } else {
-        await StartCapture();
+        await Backend.StartCapture();
       }
     } catch (e) {
       pushLog(String(e));
