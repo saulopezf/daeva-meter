@@ -19,6 +19,7 @@ export interface CaptureState {
   error: string;
   stats: Stats;
   logPath: string;
+  dev: boolean;
 }
 
 // Una fila de la tabla de DPS, procedente de aion2.MemberStat.

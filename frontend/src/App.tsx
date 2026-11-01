@@ -111,6 +111,10 @@ export default function App() {
   // Máximo de DPS para escalar las barras de forma relativa al primero.
   const maxDps = Math.max(...members.map((m) => m.dps), 1);
   const lastLog = logs.length > 0 ? logs[logs.length - 1] : '';
+  // El panel de diagnóstico solo se pinta en compilaciones de desarrollo. Vite
+  // elimina el bloque del bundle de producción, y el backend confirma el modo
+  // con el mismo build tag que controla el log de sesión.
+  const dev = import.meta.env.MODE === 'development' && state?.dev === true;
   const fightLabel = combat.isBoss
     ? `${combat.boss} — ${combat.active ? 'FIGHT' : 'ENDED'} ${combat.elapsed.toFixed(0)}s`
     : combat.active
@@ -121,18 +125,35 @@ export default function App() {
 
   return (
     <div className="app">
-      <header>
-        <span className={`badge badge-${status}`}>
-          <i className="dot" />
-          {STATUS_LABEL[status]}
-        </span>
-        <span className="port">tcp/13328</span>
-        {state?.logPath && (
-          <span className="port" title="session log file">
-            {state.logPath}
-          </span>
-        )}
-      </header>
+      {dev && (
+        <details className="dev-panel">
+          <summary>dev</summary>
+          <div className="dev-body">
+            <div className="dev-row">
+              <span className={`badge badge-${status}`}>
+                <i className="dot" />
+                {STATUS_LABEL[status]}
+              </span>
+              <span className="port">tcp/13328</span>
+              {state?.logPath && (
+                <span className="dev-path" title={state.logPath}>
+                  {state.logPath}
+                </span>
+              )}
+            </div>
+            <div className="stats">
+              <span title="dispositivos de captura">{stats.devices} dev</span>
+              <span title="streams TCP reensamblados">{stats.streams} str</span>
+              <span title="paquetes por segundo">{Math.round(stats.packetsPerSec)} pps</span>
+              <span title="bytes capturados">{fmtCompact(stats.bytes)}</span>
+              <span title="huecos de reensamblado">g{stats.gaps}</span>
+            </div>
+            <div className="log" title={lastLog}>
+              {lastLog || 'waiting for capture…'}
+            </div>
+          </div>
+        </details>
+      )}
 
       {state?.error && <div className="error">{state.error}</div>}
 
@@ -158,19 +179,6 @@ export default function App() {
           ))
         )}
       </main>
-
-      <footer>
-        <div className="stats">
-          <span title="dispositivos de captura">{stats.devices} dev</span>
-          <span title="streams TCP reensamblados">{stats.streams} str</span>
-          <span title="paquetes por segundo">{Math.round(stats.packetsPerSec)} pps</span>
-          <span title="bytes capturados">{fmtCompact(stats.bytes)}</span>
-          <span title="huecos de reensamblado">g{stats.gaps}</span>
-        </div>
-        <div className="log" title={lastLog}>
-          {lastLog || 'waiting for capture…'}
-        </div>
-      </footer>
     </div>
   );
 }

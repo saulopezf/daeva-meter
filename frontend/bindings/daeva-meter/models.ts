@@ -13,4 +13,10 @@ export interface CaptureState {
     "error": string;
     "stats": sniffer$0.Stats;
     "logPath": string;
+
+    /**
+     * Dev indica que la app se compiló en modo desarrollo. El frontend lo usa
+     * para mostrar el panel de diagnóstico solo en builds de desarrollo.
+     */
+    "dev": boolean;
 }

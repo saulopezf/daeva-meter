@@ -25,6 +25,9 @@ type CaptureState struct {
 	Error   string        `json:"error"`
 	Stats   sniffer.Stats `json:"stats"`
 	LogPath string        `json:"logPath"`
+	// Dev indica que la app se compiló en modo desarrollo. El frontend lo usa
+	// para mostrar el panel de diagnóstico solo en builds de desarrollo.
+	Dev bool `json:"dev"`
 }
 
 // App es el backend de la aplicación. Coordina el sniffer (captura de red), el
@@ -352,7 +355,7 @@ func (a *App) closeSessionLog() {
 // CaptureStatus devuelve el estado actual de la captura para la interfaz.
 func (a *App) CaptureStatus() CaptureState {
 	a.mu.Lock()
-	st := CaptureState{Error: a.lastErr}
+	st := CaptureState{Error: a.lastErr, Dev: devMode}
 	if a.sn != nil {
 		st.Running = a.sn.Running()
 		st.Stats = a.sn.Stats()

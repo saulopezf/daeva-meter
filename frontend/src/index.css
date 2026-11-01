@@ -90,9 +90,76 @@ header {
 }
 
 .port {
-  margin-left: auto;
   color: var(--dim);
   font: 11px var(--mono);
+}
+
+/* Panel de diagnóstico de desarrollo. Solo se pinta en compilaciones sin el
+   tag "production"; en la app distribuida no existe. */
+.dev-panel {
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  font: 11px var(--mono);
+}
+
+.dev-panel summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  list-style: none;
+}
+
+.dev-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.dev-panel summary::before {
+  content: '▸';
+  font-size: 9px;
+}
+
+.dev-panel[open] summary::before {
+  content: '▾';
+}
+
+.dev-panel summary:hover {
+  color: var(--text);
+}
+
+.dev-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 12px 9px;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.dev-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.dev-path {
+  flex: 1 1 100%;
+  min-width: 0;
+  color: var(--dim);
+  font: 10px var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dev-body .log {
+  margin-top: 0;
 }
 
 .btn {

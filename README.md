@@ -37,7 +37,7 @@ interactúa con él ni necesita modificarlo.
 
 ### La ventana
 
-- **Estado** (arriba a la izquierda):
+- **Estado** (en el panel `dev` de las compilaciones de desarrollo):
   - `LISTENING`: está escuchando, pero aún no ha visto tráfico del juego.
   - `LIVE`: está recibiendo datos del juego.
   - `STOPPED`: la captura está detenida.
@@ -50,7 +50,9 @@ interactúa con él ni necesita modificarlo.
   - **Pulsa una fila** para abrir una ventana con el desglose por habilidad. La
     ventana se actualiza en vivo y se reutiliza si vuelves a pulsar el mismo
     jugador.
-- **Pie de la ventana**: contadores de red y el último mensaje de estado.
+- **Panel `dev`** (solo compilaciones de desarrollo): desplegable bajo la
+  cabecera con el estado de captura, el puerto, la ruta del log de sesión y los
+  contadores de red. En la versión distribuida no aparece.
 
 ## Si no funciona
 
@@ -133,4 +135,5 @@ cd frontend && npm install
 ```
 
 Los bindings generados se guardan en `frontend/bindings/` y el build de
-producción usa el tag `production` (desactiva el log de sesión).
+producción usa el tag `production` (desactiva el log de sesión y el panel de
+diagnóstico `dev`).
