@@ -65,6 +65,9 @@ export interface SkillStat {
 export interface Snapshot {
     "active": boolean;
     "elapsed": number;
+    "boss": string;
+    "bossId": number;
+    "isBoss": boolean;
     "selfId": number;
     "self": string;
     "members": MemberStat[] | null;

@@ -196,6 +196,8 @@ func (p *Parser) parsePacket(pkt []byte, ts time.Time) {
 		p.parseSelfStats(pkt)
 	case [2]byte{0x23, 0x36}: // teletransporte de la entidad 0 = cambio de zona
 		p.parseZoneChange(pkt)
+	case [2]byte{0x42, 0x36}: // retirada/desaparición de entidad
+		p.parseEntityRemove(pkt)
 	case [2]byte{0x13, 0x92}: // salida del grupo
 		p.parseGroupExit(pkt, 0x13, 0x92)
 	case [2]byte{0x1D, 0x97}: // salida de la raid
@@ -230,6 +232,25 @@ func (p *Parser) parseZoneChange(pkt []byte) {
 	if id, ok := tryVarint(pkt, &o); ok && id == 0 {
 		p.combat.ResetEncounter()
 	}
+}
+
+// parseEntityRemove maneja 42 36 <id> 00 <flag>: la entidad deja de estar
+// visible (muerte, despawn o salida de rango). Marca la entidad como retirada;
+// si era el jefe del encuentro actual, lo cierra.
+func (p *Parser) parseEntityRemove(pkt []byte) {
+	_, n := readVarint(pkt, 0)
+	if n <= 0 || n+1 >= len(pkt) || pkt[n] != 0x42 || pkt[n+1] != 0x36 {
+		return
+	}
+	o := n + 2
+	id, ok := tryVarint(pkt, &o)
+	if !ok || id <= 0 || id > 9_999_999 {
+		return
+	}
+	if o >= len(pkt) || pkt[o] != 0 {
+		return
+	}
+	p.combat.MarkRemoved(id)
 }
 
 // parseGroupExit maneja los frames exactos 13 92 00 00 / 1D 97 00 00 (§8.8), que
@@ -306,6 +327,11 @@ func (p *Parser) parseSummonSpawn(pkt []byte, ts time.Time) {
 		owner = p.summonOwner(pkt, o, id)
 	}
 	p.combat.MarkNPC(id, owner)
+	// Los jefes de mazmorra comparten el flag 0x220c en los 16 bits bajos de la
+	// máscara de spawn. Es la señal que usa el modelo para aplicar bossGrace.
+	if mask&0xFFFF == 0x220c {
+		p.combat.MarkBoss(id)
+	}
 }
 
 // summonOwner resuelve el dueño de un summon usando los patrones conocidos

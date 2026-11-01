@@ -6,10 +6,23 @@ import (
 	"time"
 )
 
-// idleTimeout es cuánto tiempo sigue activo un encuentro tras el último golpe.
-// Cuando transcurre, el encuentro se congela; el siguiente golpe válido inicia
-// uno nuevo.
-const idleTimeout = 5 * time.Second
+const (
+	// idleTimeout es cuánto tiempo sigue activo un encuentro tras el último
+	// golpe. Cuando transcurre, el encuentro se congela; el siguiente golpe
+	// válido inicia uno nuevo.
+	idleTimeout = 5 * time.Second
+
+	// phaseGrace permite continuar un encuentro cuando el objetivo ya había
+	// recibido daño, aunque el grupo haya dejado de atacarlo durante una
+	// transición de fase. Solo se aplica a objetivos ya vistos: un enemigo
+	// distinto después del timeout sigue abriendo un encuentro nuevo.
+	phaseGrace = 30 * time.Second
+
+	// bossGrace es la ventana de un encuentro contra un jefe. Es más larga
+	// porque las fases pueden dejar al jefe sin recibir daño durante varios
+	// segundos. El encuentro se cierra antes si el jefe desaparece (42 36).
+	bossGrace = 60 * time.Second
+)
 
 // Entity es un objeto de juego visto en el cable: un jugador, un NPC o un summon.
 type Entity struct {
@@ -22,6 +35,8 @@ type Entity struct {
 	Self     bool
 	NPC      bool
 	Owner    int // id del dueño para summons/mascotas
+	Boss     bool
+	Removed  bool
 }
 
 // Hit es un evento de daño/curación producido por el parser de daño.
@@ -95,6 +110,9 @@ type MemberDetail struct {
 type Snapshot struct {
 	Active  bool         `json:"active"`
 	Elapsed float64      `json:"elapsed"`
+	Boss    string       `json:"boss"`
+	BossID  int          `json:"bossId"`
+	IsBoss  bool         `json:"isBoss"`
 	SelfID  int          `json:"selfId"`
 	Self    string       `json:"self"`
 	Members []MemberStat `json:"members"`
@@ -139,6 +157,16 @@ type encounter struct {
 	// del desglose por habilidad y, en una segunda iteración, del desglose por
 	// enemigo.
 	breakdown map[hitKey]*hitAcc
+
+	// targets guarda el último golpe recibido por cada objetivo. Sirve para
+	// distinguir una fase del mismo enemigo de un pull contra otro enemigo.
+	targets map[int]int64
+
+	// mainTarget es el primer jefe dañado en el encuentro; boss indica que el
+	// encuentro es contra un jefe y closed que el jefe ya desapareció.
+	mainTarget int
+	boss       bool
+	closed     bool
 }
 
 func newEncounter() *encounter {
@@ -147,6 +175,7 @@ func newEncounter() *encounter {
 		hits:      map[int]int{},
 		crits:     map[int]int{},
 		breakdown: map[hitKey]*hitAcc{},
+		targets:   map[int]int64{},
 	}
 }
 
@@ -265,8 +294,39 @@ func (c *Combat) MarkNPC(id int, owner int) {
 	}
 	e := c.ensure(id)
 	e.NPC = true
+	e.Removed = false
 	if owner > 0 {
 		e.Owner = owner
+	}
+}
+
+// MarkBoss marca una entidad como jefe. Los encuentros contra jefes usan una
+// ventana de gracia más larga para no dividirse durante las transiciones de fase.
+func (c *Combat) MarkBoss(id int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if id <= 0 {
+		return
+	}
+	e := c.ensure(id)
+	e.NPC = true
+	e.Boss = true
+	e.Removed = false
+}
+
+// MarkRemoved marca una entidad como retirada (muerte, despawn o salida de
+// visibilidad). Si era el jefe principal del encuentro actual, lo cierra para
+// que el siguiente golpe abra uno nuevo.
+func (c *Combat) MarkRemoved(id int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if id <= 0 {
+		return
+	}
+	e := c.ensure(id)
+	e.Removed = true
+	if c.cur != nil && c.cur.boss && c.cur.mainTarget == id {
+		c.cur.closed = true
 	}
 }
 
@@ -396,20 +456,29 @@ func (c *Combat) AddHit(ts time.Time, h Hit) {
 	if !c.isGroupActorLocked(h.Actor) {
 		return
 	}
-	if c.cur == nil || ts.Sub(c.cur.last) > idleTimeout {
+	if c.cur == nil || c.cur.closed || c.splitLocked(ts, h.Target) {
 		c.cur = newEncounter()
 	}
-	c.cur.damage[h.Actor] += int64(total)
-	c.cur.hits[h.Actor]++
+	enc := c.cur
+	if e := c.entities[h.Target]; e != nil && e.Boss {
+		enc.boss = true
+		if enc.mainTarget == 0 {
+			enc.mainTarget = h.Target
+		}
+	}
+	enc.targets[h.Target] = ts.UnixNano()
+
+	enc.damage[h.Actor] += int64(total)
+	enc.hits[h.Actor]++
 	if h.Crit {
-		c.cur.crits[h.Actor]++
+		enc.crits[h.Actor]++
 	}
 
 	key := hitKey{actor: h.Actor, skill: h.Skill, target: h.Target}
-	acc := c.cur.breakdown[key]
+	acc := enc.breakdown[key]
 	if acc == nil {
 		acc = &hitAcc{}
-		c.cur.breakdown[key] = acc
+		enc.breakdown[key] = acc
 	}
 	acc.damage += int64(total)
 	acc.hits++
@@ -418,10 +487,42 @@ func (c *Combat) AddHit(ts time.Time, h Hit) {
 	}
 	acc.extraHits += h.ExtraHits
 
-	if c.cur.start.IsZero() {
-		c.cur.start = ts
+	if enc.start.IsZero() {
+		enc.start = ts
 	}
-	c.cur.last = ts
+	enc.last = ts
+}
+
+// splitLocked decide si un golpe debe abrir un encuentro nuevo. Requiere c.mu.
+//
+// Un encuentro de jefe se mantiene durante bossGrace para cubrir fases en las
+// que el grupo no puede atacar; un jefe distinto siempre abre uno nuevo. En
+// encuentros normales, solo se toleran huecos de phaseGrace si el objetivo ya
+// había recibido daño en el mismo encuentro, para no fusionar pulls distintos.
+func (c *Combat) splitLocked(ts time.Time, target int) bool {
+	enc := c.cur
+	if enc == nil {
+		return true
+	}
+	// Un jefe distinto siempre abre un encuentro nuevo, aunque llegue dentro
+	// del timeout normal (por ejemplo, un add con flag de jefe).
+	if enc.boss {
+		if e := c.entities[target]; e != nil && e.Boss && target != enc.mainTarget {
+			return true
+		}
+	}
+	gap := ts.Sub(enc.last)
+	if gap <= idleTimeout {
+		return false
+	}
+	if enc.boss {
+		return gap > bossGrace
+	}
+	if gap <= phaseGrace {
+		_, seen := enc.targets[target]
+		return !seen
+	}
+	return true
 }
 
 // ResetEncounter descarta el encuentro actual y el congelado (cambio de zona).
@@ -458,6 +559,19 @@ func (c *Combat) Snapshot(now time.Time) Snapshot {
 	}
 	snap.Active = active
 	snap.Elapsed = elapsed
+	if enc.boss && enc.mainTarget > 0 {
+		snap.IsBoss = true
+		snap.BossID = enc.mainTarget
+		name := ""
+		if e := c.entities[enc.mainTarget]; e != nil {
+			name = e.Name
+		}
+		if name != "" {
+			snap.Boss = name
+		} else {
+			snap.Boss = "Jefe #" + itoa(enc.mainTarget)
+		}
+	}
 	for _, r := range rows {
 		cls, color := ClassName(r.class)
 		if cls == "" {
@@ -578,7 +692,10 @@ func (c *Combat) rowsLocked(now time.Time) (map[string]*aggRow, *encounter, bool
 	if enc == nil {
 		return nil, nil, false, 0
 	}
-	active := now.Sub(enc.last) < idleTimeout
+	active := !enc.closed && now.Sub(enc.last) < idleTimeout
+	if enc.boss && !enc.closed {
+		active = now.Sub(enc.last) < bossGrace
+	}
 	elapsed := enc.last.Sub(enc.start).Seconds()
 	if elapsed < 0.001 {
 		elapsed = 0.001

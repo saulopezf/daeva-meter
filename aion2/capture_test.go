@@ -226,6 +226,36 @@ func TestCaptureGroupNoDuplicateNames(t *testing.T) {
 	}
 }
 
+// TestCaptureDraupnirBossPhaseNoReset reproduce el bug del último jefe de
+// Draupnir: los huecos de fase no deben partir el encuentro. La captura tenía
+// cuatro fragmentos que antes se mostraban por separado; ahora deben aparecer
+// como un único encuentro de ~113 s.
+func TestCaptureDraupnirBossPhaseNoReset(t *testing.T) {
+	path := capturePath("session-20261031-012449.txt")
+	if _, err := os.Stat(path); err != nil {
+		t.Skipf("capture not present: %v", err)
+	}
+
+	combat, snap := replayCapture(t, path)
+	if !snap.IsBoss || snap.BossID != 62324 || snap.Boss != "Jefe #62324" {
+		t.Fatalf("boss = %q id=%d isBoss=%v, want Jefe #62324", snap.Boss, snap.BossID, snap.IsBoss)
+	}
+	if snap.Elapsed < 112 || snap.Elapsed > 114 {
+		t.Errorf("elapsed = %.1f, want ~113s", snap.Elapsed)
+	}
+	var total int64
+	for _, m := range snap.Members {
+		total += m.Damage
+	}
+	if total < 7_800_000 {
+		t.Errorf("total damage = %d, want the merged boss fight (>7.8M)", total)
+	}
+	e := findEntity(t, combat, 62324)
+	if !e.Boss || !e.Removed {
+		t.Errorf("entity = %+v, want boss marked and removed", e)
+	}
+}
+
 func contains(list []string, s string) bool {
 	for _, v := range list {
 		if v == s {

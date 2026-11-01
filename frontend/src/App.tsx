@@ -21,6 +21,9 @@ const EMPTY_STATS: Stats = {
 const EMPTY_COMBAT: CombatSnapshot = {
   active: false,
   elapsed: 0,
+  boss: '',
+  bossId: 0,
+  isBoss: false,
   selfId: 0,
   self: '',
   members: [],
@@ -46,7 +49,6 @@ export default function App() {
   const [stats, setStats] = useState<Stats>(EMPTY_STATS);
   const [combat, setCombat] = useState<CombatSnapshot>(EMPTY_COMBAT);
   const [logs, setLogs] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
 
   // pushLog conserva solo las últimas 5 líneas de log para el pie.
   const pushLog = useCallback((msg: string) => {
@@ -93,23 +95,6 @@ export default function App() {
     [pushLog],
   );
 
-  // toggle arranca o detiene la captura según el estado actual.
-  const toggle = useCallback(async () => {
-    setBusy(true);
-    try {
-      if (state?.running) {
-        await Backend.StopCapture();
-      } else {
-        await Backend.StartCapture();
-      }
-    } catch (e) {
-      pushLog(String(e));
-    } finally {
-      await refresh();
-      setBusy(false);
-    }
-  }, [state, refresh, pushLog]);
-
   // Deriva la etiqueta de estado a partir de los datos del backend.
   const status: Status =
     state === null
@@ -126,6 +111,13 @@ export default function App() {
   // Máximo de DPS para escalar las barras de forma relativa al primero.
   const maxDps = Math.max(...members.map((m) => m.dps), 1);
   const lastLog = logs.length > 0 ? logs[logs.length - 1] : '';
+  const fightLabel = combat.isBoss
+    ? `${combat.boss} — ${combat.active ? 'FIGHT' : 'ENDED'} ${combat.elapsed.toFixed(0)}s`
+    : combat.active
+      ? `FIGHT ${combat.elapsed.toFixed(0)}s`
+      : members.length
+        ? `ENDED ${combat.elapsed.toFixed(0)}s`
+        : 'IDLE';
 
   return (
     <div className="app">
@@ -140,9 +132,6 @@ export default function App() {
             {state.logPath}
           </span>
         )}
-        <button className="btn" onClick={() => void toggle()} disabled={busy || status === 'connecting'}>
-          {state?.running ? 'Stop' : 'Start'}
-        </button>
       </header>
 
       {state?.error && <div className="error">{state.error}</div>}
@@ -151,13 +140,7 @@ export default function App() {
         <span>
           Party DPS <small className="hint">click a row for skills</small>
         </span>
-        <span className={combat.active ? 'live-tag' : 'mock'}>
-          {combat.active
-            ? `FIGHT ${combat.elapsed.toFixed(0)}s`
-            : members.length
-              ? `ENDED ${combat.elapsed.toFixed(0)}s`
-              : 'IDLE'}
-        </span>
+        <span className={combat.active ? 'live-tag' : 'mock'}>{fightLabel}</span>
       </div>
 
       <main className="rows">

@@ -72,6 +72,9 @@ export interface MemberDetail {
 export interface CombatSnapshot {
   active: boolean;
   elapsed: number;
+  boss: string;
+  bossId: number;
+  isBoss: boolean;
   selfId: number;
   self: string;
   members: CombatMember[] | null;

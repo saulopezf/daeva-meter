@@ -73,6 +73,199 @@ func TestEncounterFreezes(t *testing.T) {
 	}
 }
 
+// TestEncounterPhaseGraceSameTarget verifica que un hueco de fase sobre el
+// mismo objetivo no parte el encuentro.
+func TestEncounterPhaseGraceSameTarget(t *testing.T) {
+	c := NewCombat()
+	c.SetSelfID(100)
+	t0 := time.Unix(1000, 0)
+	c.AddHit(t0, Hit{Actor: 100, Target: 200, Damage: 100, HitType: 1})
+	c.AddHit(t0.Add(20*time.Second), Hit{Actor: 100, Target: 200, Damage: 50, HitType: 1})
+
+	snap := c.Snapshot(t0.Add(20 * time.Second))
+	if len(snap.Members) != 1 || snap.Members[0].Damage != 150 {
+		t.Fatalf("members = %+v, want one with 150", snap.Members)
+	}
+	if snap.Elapsed < 19.9 || snap.Elapsed > 20.1 {
+		t.Errorf("elapsed = %.1f, want ~20", snap.Elapsed)
+	}
+}
+
+// TestEncounterSplitsNewTargetAfterGrace verifica que un enemigo distinto
+// después del timeout abre un encuentro nuevo aunque el anterior siga dentro de
+// phaseGrace.
+func TestEncounterSplitsNewTargetAfterGrace(t *testing.T) {
+	c := NewCombat()
+	c.SetSelfID(100)
+	t0 := time.Unix(1000, 0)
+	c.AddHit(t0, Hit{Actor: 100, Target: 200, Damage: 100, HitType: 1})
+	c.AddHit(t0.Add(20*time.Second), Hit{Actor: 100, Target: 300, Damage: 50, HitType: 1})
+
+	snap := c.Snapshot(t0.Add(20 * time.Second))
+	if len(snap.Members) != 1 || snap.Members[0].Damage != 50 {
+		t.Fatalf("members = %+v, want one with 50 (new target starts a new encounter)", snap.Members)
+	}
+}
+
+// TestEncounterPhaseGraceExpires verifica que el mismo objetivo tras más de
+// phaseGrace abre un encuentro nuevo.
+func TestEncounterPhaseGraceExpires(t *testing.T) {
+	c := NewCombat()
+	c.SetSelfID(100)
+	t0 := time.Unix(1000, 0)
+	c.AddHit(t0, Hit{Actor: 100, Target: 200, Damage: 100, HitType: 1})
+	c.AddHit(t0.Add(31*time.Second), Hit{Actor: 100, Target: 200, Damage: 50, HitType: 1})
+
+	snap := c.Snapshot(t0.Add(31 * time.Second))
+	if len(snap.Members) != 1 || snap.Members[0].Damage != 50 {
+		t.Fatalf("members = %+v, want one with 50 (grace expired)", snap.Members)
+	}
+}
+
+// TestBossEncounterLongGrace verifica que un jefe mantiene el encuentro durante
+// una transición de fase larga y que el snapshot expone su id y duración.
+func TestBossEncounterLongGrace(t *testing.T) {
+	c := NewCombat()
+	c.SetSelfID(100)
+	c.MarkBoss(200)
+	t0 := time.Unix(1000, 0)
+	c.AddHit(t0, Hit{Actor: 100, Target: 200, Damage: 100, HitType: 1})
+	c.AddHit(t0.Add(45*time.Second), Hit{Actor: 100, Target: 200, Damage: 50, HitType: 1})
+
+	snap := c.Snapshot(t0.Add(45 * time.Second))
+	if len(snap.Members) != 1 || snap.Members[0].Damage != 150 {
+		t.Fatalf("members = %+v, want one with 150", snap.Members)
+	}
+	if !snap.IsBoss || snap.BossID != 200 || snap.Boss != "Jefe #200" {
+		t.Errorf("boss = %q id=%d isBoss=%v, want Jefe #200", snap.Boss, snap.BossID, snap.IsBoss)
+	}
+	if !snap.Active {
+		t.Errorf("boss encounter should stay active during grace")
+	}
+}
+
+// TestBossEncounterContinuesOnAdds verifica que un add durante una fase no
+// parte el encuentro del jefe.
+func TestBossEncounterContinuesOnAdds(t *testing.T) {
+	c := NewCombat()
+	c.SetSelfID(100)
+	c.MarkBoss(200)
+	t0 := time.Unix(1000, 0)
+	c.AddHit(t0, Hit{Actor: 100, Target: 200, Damage: 100, HitType: 1})
+	c.AddHit(t0.Add(20*time.Second), Hit{Actor: 100, Target: 300, Damage: 50, HitType: 1})
+
+	snap := c.Snapshot(t0.Add(20 * time.Second))
+	if len(snap.Members) != 1 || snap.Members[0].Damage != 150 {
+		t.Fatalf("members = %+v, want one with 150", snap.Members)
+	}
+	if !snap.IsBoss || snap.BossID != 200 {
+		t.Errorf("boss = %q id=%d, want Jefe #200", snap.Boss, snap.BossID)
+	}
+}
+
+// TestBossRemovalClosesEncounter verifica que la retirada del jefe congela el
+// encuentro y que el siguiente golpe abre uno nuevo.
+func TestBossRemovalClosesEncounter(t *testing.T) {
+	c := NewCombat()
+	c.SetSelfID(100)
+	c.MarkBoss(200)
+	t0 := time.Unix(1000, 0)
+	c.AddHit(t0, Hit{Actor: 100, Target: 200, Damage: 100, HitType: 1})
+	c.MarkRemoved(200)
+
+	snap := c.Snapshot(t0.Add(time.Second))
+	if snap.Active {
+		t.Errorf("encounter should be closed after boss removal")
+	}
+	if len(snap.Members) != 1 || snap.Members[0].Damage != 100 {
+		t.Fatalf("members = %+v, want frozen 100", snap.Members)
+	}
+
+	c.AddHit(t0.Add(2*time.Second), Hit{Actor: 100, Target: 200, Damage: 50, HitType: 1})
+	snap = c.Snapshot(t0.Add(2 * time.Second))
+	if len(snap.Members) != 1 || snap.Members[0].Damage != 50 {
+		t.Fatalf("members = %+v, want new encounter with 50", snap.Members)
+	}
+}
+
+// TestBossDifferentBossSplits verifica que dos jefes distintos no se fusionan
+// aunque el segundo llegue enseguida.
+func TestBossDifferentBossSplits(t *testing.T) {
+	c := NewCombat()
+	c.SetSelfID(100)
+	c.MarkBoss(200)
+	c.MarkBoss(300)
+	t0 := time.Unix(1000, 0)
+	c.AddHit(t0, Hit{Actor: 100, Target: 200, Damage: 100, HitType: 1})
+	c.AddHit(t0.Add(time.Second), Hit{Actor: 100, Target: 300, Damage: 50, HitType: 1})
+
+	snap := c.Snapshot(t0.Add(time.Second))
+	if len(snap.Members) != 1 || snap.Members[0].Damage != 50 {
+		t.Fatalf("members = %+v, want new encounter with 50 for the second boss", snap.Members)
+	}
+	if snap.BossID != 300 {
+		t.Errorf("bossId = %d, want 300", snap.BossID)
+	}
+}
+
+// TestNonBossSnapshotHasNoBoss verifica que los encuentros normales no exponen
+// información de jefe.
+func TestNonBossSnapshotHasNoBoss(t *testing.T) {
+	c := NewCombat()
+	c.SetSelfID(100)
+	t0 := time.Unix(1000, 0)
+	c.AddHit(t0, Hit{Actor: 100, Target: 200, Damage: 100, HitType: 1})
+	snap := c.Snapshot(t0)
+	if snap.IsBoss || snap.Boss != "" || snap.BossID != 0 {
+		t.Errorf("boss = %q id=%d isBoss=%v, want no boss", snap.Boss, snap.BossID, snap.IsBoss)
+	}
+}
+
+// TestParserMarksBossSpawn verifica que la máscara 0x220c marca el NPC como
+// jefe al parsear un spawn 41 36.
+func TestParserMarksBossSpawn(t *testing.T) {
+	c := NewCombat()
+	p := NewParser(c)
+	// 0c = longitud, 41 36 = opcode, c8 01 = id 200, 0c 22 00 37 = 0x3700220c.
+	p.ConsumeStream([]byte{0x0c, 0x41, 0x36, 0xc8, 0x01, 0x0c, 0x22, 0x00, 0x37}, time.Unix(1000, 0))
+	e := findEntity(t, c, 200)
+	if !e.Boss || !e.NPC {
+		t.Fatalf("entity = %+v, want NPC boss", e)
+	}
+}
+
+// TestParserLeavesNormalNPCNotBoss verifica que una máscara normal no marca el
+// NPC como jefe.
+func TestParserLeavesNormalNPCNotBoss(t *testing.T) {
+	c := NewCombat()
+	p := NewParser(c)
+	// 0c 20 00 07 = 0x0700200c, un NPC normal.
+	p.ConsumeStream([]byte{0x0c, 0x41, 0x36, 0xc8, 0x01, 0x0c, 0x20, 0x00, 0x07}, time.Unix(1000, 0))
+	e := findEntity(t, c, 200)
+	if e.Boss {
+		t.Fatalf("entity = %+v, want non-boss", e)
+	}
+}
+
+// TestParserClosesBossOnRemove verifica que 42 36 <id> 00 <flag> cierra el
+// encuentro del jefe.
+func TestParserClosesBossOnRemove(t *testing.T) {
+	c := NewCombat()
+	c.SetSelfID(100)
+	c.MarkBoss(200)
+	t0 := time.Unix(1000, 0)
+	c.AddHit(t0, Hit{Actor: 100, Target: 200, Damage: 100, HitType: 1})
+
+	p := NewParser(c)
+	// 0a = longitud, 42 36 = opcode, c8 01 = id 200, 00 03 = payload.
+	p.ConsumeStream([]byte{0x0a, 0x42, 0x36, 0xc8, 0x01, 0x00, 0x03}, t0.Add(time.Second))
+
+	snap := c.Snapshot(t0.Add(time.Second))
+	if snap.Active {
+		t.Errorf("encounter should be closed after 42 36 removal")
+	}
+}
+
 // TestNonGroupActorIgnored verifica que el daño de un actor fuera del grupo se
 // descarta una vez conocida la identidad propia.
 func TestNonGroupActorIgnored(t *testing.T) {
