@@ -40,6 +40,7 @@ export interface CombatMember {
 export interface SkillStat {
   id: number;
   name: string;
+  icon: string;
   damage: number;
   dps: number;
   share: number;

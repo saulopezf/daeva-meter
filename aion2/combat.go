@@ -76,6 +76,7 @@ type MemberStat struct {
 type SkillStat struct {
 	ID        int     `json:"id"`
 	Name      string  `json:"name"`
+	Icon      string  `json:"icon"`
 	Damage    int64   `json:"damage"`
 	DPS       float64 `json:"dps"`
 	Share     float64 `json:"share"`
@@ -663,6 +664,7 @@ func (c *Combat) MemberDetail(now time.Time, key string) MemberDetail {
 		detail.Skills = append(detail.Skills, SkillStat{
 			ID:        id,
 			Name:      SkillName(id),
+			Icon:      SkillIcon(id),
 			Damage:    acc.damage,
 			DPS:       float64(acc.damage) / elapsed,
 			Share:     share,

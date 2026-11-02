@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Events } from '@wailsio/runtime';
 import { App as Backend } from '../bindings/daeva-meter';
+import { classEmblem } from './classes';
 import { fmtCompact } from './format';
 import type { MemberDetail as MemberDetailData, SkillStat } from './types';
 
@@ -61,12 +62,22 @@ export default function MemberDetail({ memberKey, initialName }: MemberDetailPro
   const critRate = detail && detail.hits > 0 ? (detail.crits / detail.hits) * 100 : 0;
   const name = detail?.name || initialName || 'Unknown';
   const color = detail?.color || '#8b94a7';
+  const emblem = classEmblem(detail?.class ?? '');
   const status = waiting ? 'WAITING' : detail?.active ? 'LIVE' : detail ? 'ENDED' : 'WAITING';
 
   return (
     <div className="app">
       <header className="detail-head">
         <div className="detail-title">
+          {emblem && (
+            <img
+              className="class-emblem detail-emblem"
+              src={emblem}
+              alt=""
+              title={detail?.class}
+              draggable={false}
+            />
+          )}
           <span className="name" style={{ color }}>
             {name}
           </span>
@@ -131,6 +142,19 @@ export default function MemberDetail({ memberKey, initialName }: MemberDetailPro
             return (
               <div className="skill-row" key={skill.id}>
                 <div className="skill-top">
+                  <span className="skill-icon-wrap">
+                    {skill.icon ? (
+                      <img
+                        className="skill-icon"
+                        src={`/${skill.icon}`}
+                        alt=""
+                        loading="lazy"
+                        draggable={false}
+                      />
+                    ) : (
+                      <span className="skill-icon-fallback" aria-hidden="true" />
+                    )}
+                  </span>
                   <span className="skill-name" title={skillLabel(skill)}>
                     {skillLabel(skill)}
                   </span>

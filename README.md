@@ -7,17 +7,17 @@ el daño de tu grupo, sin tocar ni modificar el juego.
 
 - Detecta automáticamente a tu personaje y a los miembros de tu grupo.
 - Muestra una tabla de daño en tiempo real: DPS, daño total, golpes y críticos.
-- Pulsa una fila para abrir el desglose por habilidad: daño, porcentaje del total,
-  DPS, golpes, críticos y daño medio de cada habilidad.
+- Pulsa una fila para abrir el desglose por habilidad: nombre, icono, daño,
+  porcentaje del total, DPS, golpes, críticos y daño medio de cada habilidad.
 - Suma el daño de mascotas y hechizos de suelo a quien los lanza.
 
 La captura es **pasiva**: la app solo observa el tráfico de red del juego, no
 interactúa con él ni necesita modificarlo.
 
 > **Estado:** versión inicial. Por ahora mide **daño infligido** y su desglose por
-> habilidad. Las habilidades se muestran como `Skill #<id>` hasta que se añadan
-> nombres. Próximamente se añadirán modo curación, daño recibido y desglose por
-> enemigo.
+> habilidad, con nombres e iconos. Los ids que no están en el catálogo se siguen
+> mostrando como `Skill #<id>`. Próximamente se añadirán modo curación, daño
+> recibido y desglose por enemigo.
 
 ## Qué necesitas
 
@@ -44,6 +44,7 @@ interactúa con él ni necesita modificarlo.
   - `ERROR`: algo ha fallado (mira el mensaje en rojo).
 - **Botón Start / Stop**: inicia o detiene la captura.
 - **Tabla de DPS**: una fila por jugador, ordenada de mayor a menor daño.
+  - el emblema de la izquierda → clase del jugador.
   - `dps` → daño por segundo.
   - el número de la derecha → daño total.
   - `YOU` marca tu propia fila.
@@ -66,37 +67,47 @@ interactúa con él ni necesita modificarlo.
 
 ## Catálogo de habilidades
 
-El protocolo solo proporciona el id numérico de la habilidad, así que la
-interfaz muestra `Skill #<id>` cuando no hay datos. Los nombres y metadatos están
-en `aion2/skill_catalog.json`, que se embebe en el ejecutable:
+El protocolo solo proporciona el id numérico de la habilidad. Los nombres e
+iconos están en `aion2/skill_catalog.json`, que se embebe en el ejecutable:
 
 ```json
 {
   "version": 1,
   "skills": [
     {
-      "id": 16040000,
-      "name": "Combustion",
-      "icon": "icons/16040000.png",
-      "class": "Elementalist",
-      "type": "active",
-      "description": "Opcional"
+      "id": 12240000,
+      "name": "Judgment",
+      "icon": "skills/icons/ICON_TE_SKILL_004.png"
     }
   ]
 }
 ```
 
-Solo `id` y `name` son obligatorios. `icon`, `class`, `type` y `description`
-están reservados para metadatos futuros; por ahora la interfaz solo usa el
-nombre. Los ids que no estén en el catálogo se muestran como `Skill #<id>`.
+Solo `id` y `name` son obligatorios. `icon` es una ruta relativa a la raíz del
+frontend (`frontend/public/`) y se omite si la habilidad no tiene icono. `class`,
+`type` y `description` siguen reservados para metadatos futuros.
+
+El protocolo envía variantes de nivel/especialización en los últimos cuatro
+dígitos del id (`12240450` para `Judgment`), así que la búsqueda prueba primero
+el id exacto y después su base (`id / 10000 * 10000`). Los ids que no estén en el
+catálogo se muestran como `Skill #<id>`.
 
 El JSON se parsea una sola vez al arrancar y se guarda en un mapa en memoria.
 Las entradas inválidas o duplicadas se ignoran y se registran en el log; el resto
 sigue funcionando. Un id duplicado se queda con la última entrada.
 
-> El catálogo va embebido en el `.exe`. Después de editarlo hay que recompilar
-> para que los cambios lleguen a la aplicación. Si más adelante quieres editar
-> nombres sin recompilar, se puede añadir un override externo.
+### Actualizar los assets
+
+El catálogo (`aion2/skill_catalog.json`), los iconos
+(`frontend/public/skills/icons/`) y los emblemas de clase
+(`frontend/public/classes/`)
+
+Para añadir o corregir habilidades, edita el catálogo y copia los archivos
+manualmente. Los emblemas usan los nombres internos del arte: `Elementalist` se
+sirve desde `elementalist.webp` y `Brawler` desde `fighter.webp`.
+
+> El catálogo y los assets van embebidos en el `.exe`. Después de cambiarlos hay
+> que recompilar para que los cambios lleguen a la aplicación.
 
 ## Próximas mejoras
 

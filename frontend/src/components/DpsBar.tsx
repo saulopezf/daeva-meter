@@ -1,3 +1,4 @@
+import { classEmblem } from '../classes';
 import { fmtCompact } from '../format';
 import type { CombatMember } from '../types';
 
@@ -15,6 +16,7 @@ export function DpsBar({ member, rank, maxDps, onSelect }: DpsBarProps) {
   // La barra se escala sobre maxDps y tiene un mínimo del 2% para seguir siendo
   // visible en los puestos bajos.
   const pct = maxDps > 0 ? Math.max(2, (member.dps / maxDps) * 100) : 0;
+  const emblem = classEmblem(member.class);
 
   const select = () => onSelect(member);
 
@@ -34,6 +36,16 @@ export function DpsBar({ member, rank, maxDps, onSelect }: DpsBarProps) {
     >
       <div className="row-top">
         <span className="rank">{rank}</span>
+        {emblem && (
+          <img
+            className="class-emblem"
+            src={emblem}
+            alt=""
+            title={member.class}
+            loading="lazy"
+            draggable={false}
+          />
+        )}
         <span className="name">{member.name}</span>
         {member.self && <span className="you">YOU</span>}
         <span className="cls" style={{ color: member.color }}>

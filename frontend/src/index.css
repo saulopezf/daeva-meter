@@ -261,7 +261,7 @@ header {
 
 .row-top {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 7px;
   margin-bottom: 4px;
 }
@@ -277,6 +277,13 @@ header {
   font-weight: 600;
 }
 
+.row-top .name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .you {
   background: #2b4a7a;
   color: #bcd8ff;
@@ -289,6 +296,20 @@ header {
 .cls {
   color: var(--dim);
   font-size: 11px;
+}
+
+.class-emblem {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  object-fit: contain;
+  opacity: 0.9;
+  filter: drop-shadow(0 1px 1px #0008);
+}
+
+.detail-emblem {
+  width: 22px;
+  height: 22px;
 }
 
 .dps {
@@ -357,7 +378,7 @@ footer {
 
 .detail-title {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
 }
 
@@ -433,8 +454,30 @@ footer {
 
 .skill-top {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
+}
+
+.skill-icon-wrap {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  display: inline-flex;
+}
+
+.skill-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.skill-icon-fallback {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  background: #1a2130;
+  border: 1px solid var(--line);
 }
 
 .skill-name {

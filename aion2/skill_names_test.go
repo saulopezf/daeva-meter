@@ -1,6 +1,10 @@
 package aion2
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 // TestSkillName comprueba el fallback y la consulta del catálogo en memoria.
 func TestSkillName(t *testing.T) {
@@ -17,6 +21,80 @@ func TestSkillName(t *testing.T) {
 	}
 	if info, ok := SkillByID(id); !ok || info.Name != "Test Skill" {
 		t.Fatalf("SkillByID(%d) = %+v, %v, want Test Skill", id, info, ok)
+	}
+}
+
+// TestSkillNameBaseFallback comprueba que las variantes de nivel resuelven a la
+// entrada base del catálogo y que el id exacto tiene prioridad sobre la base.
+func TestSkillNameBaseFallback(t *testing.T) {
+	const base = 87650000
+	const variant = 87650123
+
+	skillByID[base] = SkillInfo{
+		ID:   base,
+		Name: "Judgment",
+		Icon: "skills/icons/ICON_TE_SKILL_004.png",
+	}
+	t.Cleanup(func() { delete(skillByID, base) })
+
+	if got := SkillName(variant); got != "Judgment" {
+		t.Fatalf("SkillName(%d) = %q, want Judgment", variant, got)
+	}
+	if got := SkillIcon(variant); got != "skills/icons/ICON_TE_SKILL_004.png" {
+		t.Fatalf("SkillIcon(%d) = %q, want the base icon", variant, got)
+	}
+	if _, ok := SkillByID(variant); ok {
+		t.Fatalf("SkillByID(%d) found a base entry, want exact lookup only", variant)
+	}
+
+	skillByID[variant] = SkillInfo{
+		ID:   variant,
+		Name: "Judgment (max)",
+		Icon: "skills/icons/exact.png",
+	}
+	t.Cleanup(func() { delete(skillByID, variant) })
+
+	if got := SkillName(variant); got != "Judgment (max)" {
+		t.Fatalf("SkillName(%d) = %q, want the exact entry", variant, got)
+	}
+	if got := SkillIcon(variant); got != "skills/icons/exact.png" {
+		t.Fatalf("SkillIcon(%d) = %q, want the exact icon", variant, got)
+	}
+}
+
+// TestSkillIconUnknown devuelve "" cuando el id no está en el catálogo.
+func TestSkillIconUnknown(t *testing.T) {
+	if got := SkillIcon(99999999); got != "" {
+		t.Fatalf("SkillIcon(99999999) = %q, want empty", got)
+	}
+}
+
+// TestEmbeddedSkillCatalogIconsExist evita que el catálogo apunte a iconos que
+// no se copiaron a frontend/public. Se salta si los assets no están generados.
+func TestEmbeddedSkillCatalogIconsExist(t *testing.T) {
+	root := filepath.Join("..", "frontend", "public")
+	if _, err := os.Stat(root); err != nil {
+		t.Skipf("frontend/public is not available: %v", err)
+	}
+
+	checked, missing := 0, 0
+	for _, skill := range skillByID {
+		if skill.Icon == "" {
+			continue
+		}
+		checked++
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(skill.Icon))); err != nil {
+			missing++
+			if missing <= 5 {
+				t.Errorf("skill %d (%q): icon %q: %v", skill.ID, skill.Name, skill.Icon, err)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no skill in the catalog has an icon")
+	}
+	if missing > 5 {
+		t.Errorf("... and %d more missing icons", missing-5)
 	}
 }
 
