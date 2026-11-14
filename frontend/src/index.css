@@ -34,6 +34,85 @@ body {
   height: 100%;
 }
 
+/* La ventana principal ajusta su altura al contenido. El límite superior lo
+   fija useDynamicWindowHeight según el área visible de la pantalla. */
+.app-auto {
+  height: auto;
+}
+
+.app-auto .rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.app-auto .empty {
+  padding: 16px 0;
+}
+
+/* Barra de título propia de las ventanas frameless. Se integra con el fondo de
+   la app y solo contiene la marca y la cruz de cerrar. */
+.titlebar {
+  --wails-draggable: drag;
+  display: flex;
+  align-items: center;
+  flex: none;
+  height: 32px;
+  padding: 0 6px 0 12px;
+  background: var(--bg);
+  user-select: none;
+}
+
+.titlebar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--dim);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.brand-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #3ddc84;
+  box-shadow: 0 0 6px #3ddc8488;
+}
+
+.titlebar-close {
+  --wails-draggable: no-drag;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 22px;
+  margin-left: auto;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.titlebar-close svg {
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.titlebar-close:hover {
+  background: #3a1620;
+  color: #ff9b9b;
+}
+
+.titlebar-close:focus-visible {
+  outline: 1px solid #4c5a75;
+  outline-offset: -1px;
+}
+
 header {
   display: flex;
   align-items: center;
@@ -189,15 +268,98 @@ header {
   border-bottom: 1px solid #4a1d2a;
 }
 
-.section-label {
+.fight-bar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 8px 12px 2px;
-  font-size: 11px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  justify-content: space-between;
+  gap: 12px;
+  flex: none;
+  padding: 8px 12px 9px;
+  border-bottom: 1px solid #1a2231;
+}
+
+.fight-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 10px 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #171f2d;
   color: var(--dim);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.fight-kind-boss {
+  color: #ff9b9b;
+  background: #2a141a;
+  border-color: #4a1d2a;
+}
+
+.fight-kind-fight {
+  color: #6ee7a0;
+  background: #14321f;
+  border-color: #1d5133;
+}
+
+.fight-kind-idle {
+  color: var(--dim);
+}
+
+.fight-icon {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fight-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font: 600 21px var(--mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+.fight-bar-ended .fight-kind,
+.fight-bar-ended .fight-time {
+  opacity: 0.55;
+}
+
+.fight-bar-idle .fight-time {
+  color: #667085;
+}
+
+.fight-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #3ddc84;
+  box-shadow: 0 0 8px #3ddc84aa;
+  animation: fight-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes fight-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.35;
+    transform: scale(0.75);
+  }
 }
 
 .mock {
@@ -237,37 +399,54 @@ header {
   gap: 9px;
 }
 
-.hint {
-  color: #667085;
-  font-size: 9px;
-  letter-spacing: 0;
-  text-transform: none;
-  margin-left: 6px;
-}
-
 .row.clickable {
   cursor: pointer;
-  border-radius: 6px;
-  padding: 4px 6px;
-  margin: -4px -6px;
-  transition: background 0.15s ease;
-}
-
-.row.clickable:hover,
-.row.clickable:focus-visible {
-  background: #1a2233;
+  border-radius: 9px;
   outline: none;
 }
 
-.row-top {
+.bar {
+  position: relative;
+  height: 38px;
+  border: 1px solid #202a3c;
+  border-radius: 9px;
+  background: #171f2d;
+  overflow: hidden;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 8px 0 0 8px;
+  opacity: 0.34;
+  transition: width 0.55s ease, opacity 0.15s ease;
+}
+
+.bar-content {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
-  gap: 7px;
-  margin-bottom: 4px;
+  gap: 8px;
+  height: 100%;
+  padding: 0 11px;
+}
+
+.row.clickable:hover .bar,
+.row.clickable:focus-visible .bar {
+  border-color: #3a4863;
+  box-shadow: inset 0 0 0 1px #ffffff0d;
+}
+
+.row.clickable:hover .bar-fill,
+.row.clickable:focus-visible .bar-fill {
+  opacity: 0.46;
 }
 
 .rank {
-  width: 12px;
+  width: 14px;
+  flex: none;
   color: var(--dim);
   font-size: 11px;
   text-align: right;
@@ -277,11 +456,16 @@ header {
   font-weight: 600;
 }
 
-.row-top .name {
+.bar-content .name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.bar-content .class-emblem {
+  width: 20px;
+  height: 20px;
 }
 
 .you {
@@ -294,8 +478,10 @@ header {
 }
 
 .cls {
+  flex: none;
   color: var(--dim);
   font-size: 11px;
+  white-space: nowrap;
 }
 
 .class-emblem {
@@ -314,6 +500,7 @@ header {
 
 .dps {
   margin-left: auto;
+  flex: none;
   font: 600 13px var(--mono);
   font-variant-numeric: tabular-nums;
 }
@@ -325,26 +512,12 @@ header {
 }
 
 .dmg {
-  width: 56px;
+  width: 58px;
+  flex: none;
   text-align: right;
   color: var(--dim);
   font: 12px var(--mono);
   font-variant-numeric: tabular-nums;
-}
-
-.track {
-  height: 10px;
-  background: #1a2130;
-  border: 1px solid #202a3c;
-  border-radius: 5px;
-  overflow: hidden;
-}
-
-.fill {
-  height: 100%;
-  border-radius: 5px;
-  transition: width 0.6s ease;
-  opacity: 0.9;
 }
 
 footer {
@@ -444,7 +617,7 @@ footer {
 }
 
 .skill-row {
-  padding: 9px 0;
+  padding: 6px 0;
   border-bottom: 1px solid #1c2434;
 }
 
@@ -452,29 +625,32 @@ footer {
   border-bottom: none;
 }
 
-.skill-top {
-  display: flex;
-  align-items: center;
+.skill-bar {
+  height: 34px;
+}
+
+.skill-content {
   gap: 8px;
+  padding: 0 9px;
 }
 
 .skill-icon-wrap {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   flex: none;
   display: inline-flex;
 }
 
 .skill-icon {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border-radius: 4px;
   object-fit: cover;
 }
 
 .skill-icon-fallback {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border-radius: 4px;
   background: #1a2130;
   border: 1px solid var(--line);
@@ -490,23 +666,21 @@ footer {
 }
 
 .skill-damage {
+  flex: none;
   font: 600 13px var(--mono);
   font-variant-numeric: tabular-nums;
 }
 
 .skill-share {
   width: 52px;
+  flex: none;
   text-align: right;
   color: var(--dim);
   font: 11px var(--mono);
 }
 
-.skill-track {
-  height: 7px;
-  margin: 5px 0 4px;
-}
-
 .skill-meta {
+  margin-top: 4px;
   display: flex;
   flex-wrap: wrap;
   gap: 4px 12px;

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Events } from '@wailsio/runtime';
 import { App as Backend } from '../bindings/daeva-meter';
 import { classEmblem } from './classes';
+import { TitleBar } from './components/TitleBar';
 import { fmtCompact } from './format';
 import type { MemberDetail as MemberDetailData, SkillStat } from './types';
 
@@ -67,6 +68,8 @@ export default function MemberDetail({ memberKey, initialName }: MemberDetailPro
 
   return (
     <div className="app">
+      <TitleBar />
+
       <header className="detail-head">
         <div className="detail-title">
           {emblem && (
@@ -141,31 +144,31 @@ export default function MemberDetail({ memberKey, initialName }: MemberDetailPro
               skill.hits > 0 ? (skill.crits / skill.hits) * 100 : 0;
             return (
               <div className="skill-row" key={skill.id}>
-                <div className="skill-top">
-                  <span className="skill-icon-wrap">
-                    {skill.icon ? (
-                      <img
-                        className="skill-icon"
-                        src={`/${skill.icon}`}
-                        alt=""
-                        loading="lazy"
-                        draggable={false}
-                      />
-                    ) : (
-                      <span className="skill-icon-fallback" aria-hidden="true" />
-                    )}
-                  </span>
-                  <span className="skill-name" title={skillLabel(skill)}>
-                    {skillLabel(skill)}
-                  </span>
-                  <span className="skill-damage">{fmtCompact(skill.damage)}</span>
-                  <span className="skill-share">{skill.share.toFixed(1)}%</span>
-                </div>
-                <div className="track skill-track">
+                <div className="bar skill-bar">
                   <div
-                    className="fill"
+                    className="bar-fill"
                     style={{ width: `${pct}%`, background: color }}
                   />
+                  <div className="bar-content skill-content">
+                    <span className="skill-icon-wrap">
+                      {skill.icon ? (
+                        <img
+                          className="skill-icon"
+                          src={`/${skill.icon}`}
+                          alt=""
+                          loading="lazy"
+                          draggable={false}
+                        />
+                      ) : (
+                        <span className="skill-icon-fallback" aria-hidden="true" />
+                      )}
+                    </span>
+                    <span className="skill-name" title={skillLabel(skill)}>
+                      {skillLabel(skill)}
+                    </span>
+                    <span className="skill-damage">{fmtCompact(skill.damage)}</span>
+                    <span className="skill-share">{skill.share.toFixed(1)}%</span>
+                  </div>
                 </div>
                 <div className="skill-meta">
                   <span>{fmtCompact(skill.dps)}/s</span>

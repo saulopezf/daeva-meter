@@ -209,16 +209,74 @@ func (a *App) OpenMemberWindow(key, name string) {
 	if name != "" {
 		target += "&name=" + url.QueryEscape(name)
 	}
-	a.app.Window.NewWithOptions(application.WebviewWindowOptions{
+	opts := application.WebviewWindowOptions{
 		Name:             windowName,
 		Title:            title,
-		Width:            680,
-		Height:           520,
+		Width:            detailWidth,
+		Height:           detailHeight,
 		MinWidth:         560,
 		MinHeight:        360,
-		BackgroundColour: application.NewRGB(27, 38, 54),
+		Frameless:        true,
+		BackgroundColour: application.NewRGB(16, 21, 31),
 		URL:              target,
-	})
+	}
+	// La ventana principal es topmost, así que los detalles se abren a su lado
+	// para que no queden ocultos debajo de ella.
+	if x, y, ok := a.detailPlacement(); ok {
+		opts.InitialPosition = application.WindowXY
+		opts.X = x
+		opts.Y = y
+	}
+	a.app.Window.NewWithOptions(opts)
+}
+
+// Tamaño de las ventanas de detalle y separación respecto a la principal.
+const (
+	detailWidth  = 680
+	detailHeight = 520
+	detailGap    = 12
+)
+
+// detailPlacement calcula una posición para la ventana de detalle al lado de la
+// ventana principal, dentro del área de trabajo de su pantalla. Devuelve false
+// si no existe la ventana principal, en cuyo caso se usa la posición por
+// defecto de Wails (centrada).
+func (a *App) detailPlacement() (int, int, bool) {
+	mainWin, ok := a.app.Window.GetByName("main")
+	if !ok || mainWin == nil {
+		return 0, 0, false
+	}
+
+	mx, my := mainWin.Position()
+	mw, _ := mainWin.Size()
+	x := mx + mw + detailGap
+	y := my
+
+	if screen, err := mainWin.GetScreen(); err == nil && screen != nil {
+		area := screen.WorkArea
+		// Si no cabe a la derecha, se coloca a la izquierda de la principal.
+		if x+detailWidth > area.X+area.Width {
+			x = mx - detailWidth - detailGap
+		}
+		// Ajuste final para no salirse del área de trabajo.
+		if x < area.X {
+			x = area.X
+		}
+		if x+detailWidth > area.X+area.Width {
+			x = area.X + area.Width - detailWidth
+		}
+		if y < area.Y {
+			y = area.Y
+		}
+		if y+detailHeight > area.Y+area.Height {
+			y = area.Y + area.Height - detailHeight
+		}
+		if y < area.Y {
+			y = area.Y
+		}
+	}
+
+	return x, y, true
 }
 
 // detailWindowName genera un nombre estable y seguro para la ventana de detalle

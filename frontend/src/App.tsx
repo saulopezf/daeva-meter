@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { Events } from '@wailsio/runtime';
 import { App as Backend } from '../bindings/daeva-meter';
 import { DpsBar } from './components/DpsBar';
-import { fmtCompact } from './format';
+import { TitleBar } from './components/TitleBar';
+import { fmtClock, fmtCompact } from './format';
 import type { CaptureState, CombatSnapshot, CombatMember, Stats } from './types';
+import { useDynamicWindowHeight } from './useDynamicWindowHeight';
 
 // Valores por defecto mientras llega el primer estado desde el backend.
 const EMPTY_STATS: Stats = {
@@ -45,6 +47,7 @@ const STATUS_LABEL: Record<Status, string> = {
 // eventos del backend (estadísticas, logs y actualizaciones de combate) y pinta
 // la cabecera, la tabla de DPS y el pie con contadores.
 export default function App() {
+  const appRef = useDynamicWindowHeight<HTMLDivElement>();
   const [state, setState] = useState<CaptureState | null>(null);
   const [stats, setStats] = useState<Stats>(EMPTY_STATS);
   const [combat, setCombat] = useState<CombatSnapshot>(EMPTY_COMBAT);
@@ -115,16 +118,14 @@ export default function App() {
   // elimina el bloque del bundle de producción, y el backend confirma el modo
   // con el mismo build tag que controla el log de sesión.
   const dev = import.meta.env.MODE === 'development' && state?.dev === true;
-  const fightLabel = combat.isBoss
-    ? `${combat.boss} — ${combat.active ? 'FIGHT' : 'ENDED'} ${combat.elapsed.toFixed(0)}s`
-    : combat.active
-      ? `FIGHT ${combat.elapsed.toFixed(0)}s`
-      : members.length
-        ? `ENDED ${combat.elapsed.toFixed(0)}s`
-        : 'IDLE';
+  // Cabecera de combate: solo el tipo (jefe o fight normal) y el tiempo.
+  const fightState = combat.active ? 'active' : members.length > 0 ? 'ended' : 'idle';
+  const fightKind = combat.isBoss ? 'boss' : 'fight';
 
   return (
-    <div className="app">
+    <div className="app app-auto" ref={appRef}>
+      <TitleBar />
+
       {dev && (
         <details className="dev-panel">
           <summary>dev</summary>
@@ -157,11 +158,25 @@ export default function App() {
 
       {state?.error && <div className="error">{state.error}</div>}
 
-      <div className="section-label">
-        <span>
-          Party DPS <small className="hint">click a row for skills</small>
+      <div className={`fight-bar fight-bar-${fightState}`}>
+        <span className={`fight-kind fight-kind-${fightState === 'idle' ? 'idle' : fightKind}`}>
+          {fightState !== 'idle' &&
+            (combat.isBoss ? (
+              <svg className="fight-icon" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M3 10.5V5l3 2 2-3.5 2 3.5 3-2v5.5" />
+                <path d="M3 12.5h10" />
+              </svg>
+            ) : (
+              <svg className="fight-icon" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M2.5 2.5l8 8M10.5 10.5l3 3M13.5 2.5l-8 8M5.5 10.5l-3 3" />
+              </svg>
+            ))}
+          {fightState === 'idle' ? 'IDLE' : combat.isBoss ? 'BOSS' : 'FIGHT'}
         </span>
-        <span className={combat.active ? 'live-tag' : 'mock'}>{fightLabel}</span>
+        <span className="fight-time">
+          {fmtClock(combat.elapsed)}
+          {combat.active && <i className="fight-live-dot" />}
+        </span>
       </div>
 
       <main className="rows">

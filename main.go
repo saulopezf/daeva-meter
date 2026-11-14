@@ -56,12 +56,18 @@ func main() {
 	// de app.Run(), de modo que ServiceStartup ya puede usarla.
 	backend.app = app
 
+	// La ventana es frameless (el marco lo dibuja el frontend) y se mantiene
+	// siempre encima para poder consultar el DPS mientras se juega.
 	mainWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "main",
 		Title:            "daeva-meter",
 		Width:            480,
-		Height:           420,
-		BackgroundColour: application.NewRGB(27, 38, 54),
+		Height:           144,
+		MinWidth:         360,
+		MinHeight:        120,
+		Frameless:        true,
+		AlwaysOnTop:      true,
+		BackgroundColour: application.NewRGB(16, 21, 31),
 		URL:              "/",
 	})
 	// Al cerrar la ventana principal se cierran también las ventanas de detalle.
