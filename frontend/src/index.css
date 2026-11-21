@@ -272,10 +272,107 @@ header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 6px 12px;
   flex: none;
   padding: 8px 12px 9px;
   border-bottom: 1px solid #1a2231;
+}
+
+.fight-boss {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.history-label {
+  color: var(--dim);
+  font: 9px var(--mono);
+  letter-spacing: 0.08em;
+}
+
+.history-select {
+  min-width: 0;
+  max-width: 170px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #171f2d;
+  color: var(--text);
+  font: 10px var(--mono);
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+.history-select:hover {
+  border-color: #3a4863;
+}
+
+.history-select:focus-visible {
+  outline: 1px solid #4c5a75;
+  outline-offset: -1px;
+}
+
+.tabs {
+  display: flex;
+  flex: none;
+  gap: 3px;
+  padding: 6px 12px 0;
+  background: var(--bg);
+  border-bottom: 1px solid #1a2231;
+}
+
+.tab {
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  color: var(--dim);
+  padding: 5px 11px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.tab:hover {
+  background: #171f2d;
+  color: var(--text);
+}
+
+.tab-active {
+  background: var(--panel);
+  border-color: var(--line);
+  color: var(--text);
+}
+
+.tab:focus-visible {
+  outline: 1px solid #4c5a75;
+  outline-offset: -1px;
+}
+
+.metric-healing .dps {
+  color: #6ee7a0;
+}
+
+.metric-taken .dps {
+  color: #8fb3ff;
+}
+
+.skill-source {
+  color: #8fb3ff;
 }
 
 .fight-kind {

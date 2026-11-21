@@ -6,18 +6,22 @@ el daño de tu grupo, sin tocar ni modificar el juego.
 ## ¿Qué hace?
 
 - Detecta automáticamente a tu personaje y a los miembros de tu grupo.
-- Muestra una tabla de daño en tiempo real: DPS, daño total, golpes y críticos.
-- Pulsa una fila para abrir el desglose por habilidad: nombre, icono, daño,
-  porcentaje del total, DPS, golpes, críticos y daño medio de cada habilidad.
+- Muestra tres tablas en tiempo real: **Damage**, **Healing** y **Damage Taken**,
+  con ritmo por segundo, total, golpes y críticos.
+- Pulsa una fila para abrir el desglose por habilidad de la pestaña activa:
+  nombre, icono, daño/curación/daño recibido, porcentaje del total, ritmo, golpes,
+  críticos y media por golpe.
 - Suma el daño de mascotas y hechizos de suelo a quien los lanza.
+- Guarda los combates anteriores de la sesión y permite consultarlos desde el
+  selector `Live` de la barra de combate. El historial vive en memoria: se pierde
+  al cerrar la aplicación.
 
 La captura es **pasiva**: la app solo observa el tráfico de red del juego, no
 interactúa con él ni necesita modificarlo.
 
-> **Estado:** versión inicial. Por ahora mide **daño infligido** y su desglose por
-> habilidad, con nombres e iconos. Los ids que no están en el catálogo se siguen
-> mostrando como `Skill #<id>`. Próximamente se añadirán modo curación, daño
-> recibido y desglose por enemigo.
+> **Estado:** mide daño infligido, curación realizada y daño recibido, con su
+> desglose por habilidad, nombres e iconos. Los ids que no están en el catálogo se
+> siguen mostrando como `Skill #<id>`. Queda pendiente el desglose por enemigo.
 
 ## Qué necesitas
 
@@ -43,14 +47,21 @@ interactúa con él ni necesita modificarlo.
   - `STOPPED`: la captura está detenida.
   - `ERROR`: algo ha fallado (mira el mensaje en rojo).
 - **Botón Start / Stop**: inicia o detiene la captura.
-- **Tabla de DPS**: una fila por jugador, ordenada de mayor a menor daño.
+- **Barra de combate**: muestra el tipo de pelea (jefe o normal), el tiempo y el
+  selector de historial. `Live` muestra el combate actual; las demás entradas
+  abren un combate anterior de esta sesión.
+- **Pestañas Damage / Healing / Damage Taken**: cambian la tabla y el desglose.
+  - `Damage` ordena por daño infligido y muestra DPS.
+  - `Healing` ordena por curación realizada (por sanador) y muestra HPS.
+  - `Damage Taken` ordena por daño recibido (por víctima) y muestra DTPS.
+- **Tabla**: una fila por jugador, ordenada de mayor a menor valor.
   - el emblema de la izquierda → clase del jugador.
-  - `dps` → daño por segundo.
-  - el número de la derecha → daño total.
+  - el ritmo → valor por segundo (`/s`).
+  - el número de la derecha → total.
   - `YOU` marca tu propia fila.
-  - **Pulsa una fila** para abrir una ventana con el desglose por habilidad. La
-    ventana se actualiza en vivo y se reutiliza si vuelves a pulsar el mismo
-    jugador.
+  - **Pulsa una fila** para abrir una ventana con el desglose por habilidad de la
+    pestaña activa. Si el combate es el actual, la ventana se actualiza en vivo;
+    si es del historial, queda fija en ese combate.
 - **Panel `dev`** (solo compilaciones de desarrollo): desplegable bajo la
   cabecera con el estado de captura, el puerto, la ruta del log de sesión y los
   contadores de red. En la versión distribuida no aparece.
@@ -111,10 +122,8 @@ sirve desde `elementalist.webp` y `Brawler` desde `fighter.webp`.
 
 ## Próximas mejoras
 
-- Modo curación.
-- Daño recibido.
 - Daño desglosado por enemigo (el acumulador interno ya guarda el objetivo).
-- Historial de peleas (no solo la pelea actual).
+- Persistir el historial de combates entre ejecuciones de la aplicación.
 
 ## Para desarrolladores
 

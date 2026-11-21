@@ -17,6 +17,7 @@ declare module "@wailsio/runtime" {
         interface CustomEvents {
             "capture:log": string;
             "capture:stats": sniffer$0.Stats;
+            "combat:history": aion2$0.EncounterSummary[] | null;
             "combat:update": aion2$0.Snapshot;
         }
     }

@@ -36,6 +36,13 @@ export function CaptureStatus(): $CancellablePromise<$models.CaptureState> {
 }
 
 /**
+ * CombatHistory devuelve los combates anteriores de la sesión.
+ */
+export function CombatHistory(): $CancellablePromise<aion2$0.EncounterSummary[] | null> {
+    return $Call.ByID(3885258907);
+}
+
+/**
  * CombatState devuelve el encuentro actual (tabla de DPS) para el frontend.
  */
 export function CombatState(): $CancellablePromise<aion2$0.Snapshot> {
@@ -43,18 +50,27 @@ export function CombatState(): $CancellablePromise<aion2$0.Snapshot> {
 }
 
 /**
- * MemberDetail devuelve el desglose por habilidad de una fila de la tabla.
+ * CombatStateFor devuelve un combate archivado. id <= 0 es el actual.
  */
-export function MemberDetail(key: string): $CancellablePromise<aion2$0.MemberDetail> {
-    return $Call.ByID(292369370, key);
+export function CombatStateFor(id: number): $CancellablePromise<aion2$0.Snapshot> {
+    return $Call.ByID(3623079737, id);
+}
+
+/**
+ * MemberDetail devuelve el desglose por habilidad de una fila de la tabla para
+ * la métrica y el combate indicados. encounterID <= 0 usa el combate actual.
+ */
+export function MemberDetail(encounterID: number, key: string, metric: string): $CancellablePromise<aion2$0.MemberDetail> {
+    return $Call.ByID(292369370, encounterID, key, metric);
 }
 
 /**
  * OpenMemberWindow abre la ventana de detalle de un miembro. Si ya existe una
- * ventana para ese miembro, la enfoca en lugar de crear otra.
+ * ventana para ese miembro, métrica y combate, la enfoca en lugar de crear otra.
+ * encounterID <= 0 representa el combate actual.
  */
-export function OpenMemberWindow(key: string, name: string): $CancellablePromise<void> {
-    return $Call.ByID(3234408239, key, name);
+export function OpenMemberWindow(encounterID: number, key: string, name: string, metric: string): $CancellablePromise<void> {
+    return $Call.ByID(3234408239, encounterID, key, name, metric);
 }
 
 /**
@@ -67,8 +83,8 @@ export function StartCapture(): $CancellablePromise<void> {
 }
 
 /**
- * StopCapture detiene la captura si está en marcha. El log de sesión sigue
- * abierto: abarca toda la ejecución de la app y solo se cierra en el apagado.
+ * StopCapture detiene la captura si está en marcha. El log de sesión y el
+ * historial de combates siguen vivos: solo se cierran en el apagado.
  */
 export function StopCapture(): $CancellablePromise<void> {
     return $Call.ByID(2057482729);

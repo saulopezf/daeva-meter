@@ -19,6 +19,11 @@ export const CaptureLog = "capture:log";
 export const CaptureStats = "capture:stats";
 
 /**
+ * Name of the custom event "combat:history".
+ */
+export const CombatHistory = "combat:history";
+
+/**
  * Name of the custom event "combat:update".
  */
 export const CombatUpdate = "combat:update";

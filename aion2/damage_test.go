@@ -35,6 +35,27 @@ func buildDamageFrame(t *testing.T, hexBody string) []byte {
 	return append(encodeVarint(L), body...)
 }
 
+// TestDamageVectorKeepsHeal comprueba que el bloque opcional 03 00 <cifra> que
+// sigue al daño se conserva en Hit.Heal para la pestaña de curación.
+func TestDamageVectorKeepsHeal(t *testing.T) {
+	c := NewCombat()
+	var got *Hit
+	c.OnHit = func(h Hit) { hh := h; got = &hh }
+	p := NewParser(c)
+	// Vector real de daño + 03 00 64 (curación de 100).
+	frame := buildDamageFrame(t, "b1ea011600f30a40c0f40063028000010b199b5f01000000ac52d007030064")
+	p.parseDamage(frame, false, false)
+	if got == nil {
+		t.Fatal("expected a hit, got none")
+	}
+	if got.Heal != 100 {
+		t.Errorf("heal = %d, want 100", got.Heal)
+	}
+	if total := got.Damage + got.ExtraDamage; total != 976 {
+		t.Errorf("damage = %d, want 976", total)
+	}
+}
+
 // TestDamageVectors comprueba parseDamage contra una tabla de vectores reales
 // capturados del juego: daño total, número y daño de golpes extra, target, actor
 // y habilidad.

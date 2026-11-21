@@ -30,6 +30,7 @@ func init() {
 	application.RegisterEvent[sniffer.Stats]("capture:stats")
 	application.RegisterEvent[string]("capture:log")
 	application.RegisterEvent[aion2.Snapshot]("combat:update")
+	application.RegisterEvent[[]aion2.EncounterSummary]("combat:history")
 }
 
 // main es el punto de entrada de la aplicación Wails. Crea la aplicación,

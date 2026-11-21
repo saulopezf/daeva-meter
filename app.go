@@ -105,8 +105,14 @@ func (a *App) StartCapture() error {
 		return nil
 	}
 
-	a.combat.Store(aion2.NewCombat())
-	a.parser.Store(aion2.NewParser(a.combat.Load()))
+	// El modelo de combate sobrevive a parar/arrancar la captura para que el
+	// historial de la sesión no se pierda hasta cerrar la aplicación.
+	c := a.combat.Load()
+	if c == nil {
+		c = aion2.NewCombat()
+		a.combat.Store(c)
+	}
+	a.parser.Store(aion2.NewParser(c))
 
 	s := sniffer.New(sniffer.Options{
 		Port:    sniffer.DefaultPort,
@@ -121,7 +127,6 @@ func (a *App) StartCapture() error {
 	})
 
 	if err := s.Start(); err != nil {
-		a.combat.Store(nil)
 		a.parser.Store(nil)
 		a.lastErr = err.Error()
 		return err
@@ -149,10 +154,12 @@ func (a *App) onPayload(streamID int64, dir sniffer.Direction, ts time.Time, b [
 }
 
 // emitCombat empuja una instantánea del combate a la interfaz dos veces por
-// segundo. Se detiene cuando se cierra el canal stop.
+// segundo y avisa cuando el historial gana una entrada. Se detiene cuando se
+// cierra el canal stop.
 func (a *App) emitCombat(stop chan struct{}) {
 	t := time.NewTicker(500 * time.Millisecond)
 	defer t.Stop()
+	lastHistory := -1
 	for {
 		select {
 		case <-stop:
@@ -162,7 +169,13 @@ func (a *App) emitCombat(stop chan struct{}) {
 			if c == nil {
 				continue
 			}
-			a.emit("combat:update", c.Snapshot(time.Now()))
+			now := time.Now()
+			a.emit("combat:update", c.Snapshot(now))
+			history := c.History(now)
+			if len(history) != lastHistory {
+				lastHistory = len(history)
+				a.emit("combat:history", history)
+			}
 		}
 	}
 }
@@ -175,19 +188,40 @@ func (a *App) CombatState() aion2.Snapshot {
 	return aion2.Snapshot{}
 }
 
-// MemberDetail devuelve el desglose por habilidad de una fila de la tabla.
-func (a *App) MemberDetail(key string) aion2.MemberDetail {
+// CombatStateFor devuelve un combate archivado. id <= 0 es el actual.
+func (a *App) CombatStateFor(id int) aion2.Snapshot {
 	if c := a.combat.Load(); c != nil {
-		return c.MemberDetail(time.Now(), key)
+		return c.SnapshotFor(time.Now(), id)
 	}
-	return aion2.MemberDetail{Key: key, Skills: []aion2.SkillStat{}}
+	return aion2.Snapshot{}
+}
+
+// CombatHistory devuelve los combates anteriores de la sesión.
+func (a *App) CombatHistory() []aion2.EncounterSummary {
+	if c := a.combat.Load(); c != nil {
+		return c.History(time.Now())
+	}
+	return []aion2.EncounterSummary{}
+}
+
+// MemberDetail devuelve el desglose por habilidad de una fila de la tabla para
+// la métrica y el combate indicados. encounterID <= 0 usa el combate actual.
+func (a *App) MemberDetail(encounterID int, key, metric string) aion2.MemberDetail {
+	if c := a.combat.Load(); c != nil {
+		return c.MemberDetailFor(time.Now(), encounterID, key, aion2.Metric(metric))
+	}
+	return aion2.MemberDetail{Key: key, Metric: aion2.Metric(metric), Skills: []aion2.SkillStat{}}
 }
 
 // OpenMemberWindow abre la ventana de detalle de un miembro. Si ya existe una
-// ventana para ese miembro, la enfoca en lugar de crear otra.
-func (a *App) OpenMemberWindow(key, name string) {
+// ventana para ese miembro, métrica y combate, la enfoca en lugar de crear otra.
+// encounterID <= 0 representa el combate actual.
+func (a *App) OpenMemberWindow(encounterID int, key, name, metric string) {
 	if a.app == nil || key == "" {
 		return
+	}
+	if metric != string(aion2.MetricHealing) && metric != string(aion2.MetricTaken) {
+		metric = string(aion2.MetricDamage)
 	}
 
 	a.winMu.Lock()
@@ -197,7 +231,7 @@ func (a *App) OpenMemberWindow(key, name string) {
 	if name != "" {
 		title += " — " + name
 	}
-	windowName := detailWindowName(key)
+	windowName := detailWindowName(key, encounterID, metric)
 	if win, ok := a.app.Window.GetByName(windowName); ok {
 		win.SetTitle(title)
 		win.Show()
@@ -205,7 +239,8 @@ func (a *App) OpenMemberWindow(key, name string) {
 		return
 	}
 
-	target := "/?member=" + url.QueryEscape(key)
+	target := fmt.Sprintf("/?member=%s&encounter=%d&metric=%s",
+		url.QueryEscape(key), encounterID, url.QueryEscape(metric))
 	if name != "" {
 		target += "&name=" + url.QueryEscape(name)
 	}
@@ -280,10 +315,10 @@ func (a *App) detailPlacement() (int, int, bool) {
 }
 
 // detailWindowName genera un nombre estable y seguro para la ventana de detalle
-// a partir de la clave del miembro.
-func detailWindowName(key string) string {
+// a partir de la clave del miembro, el combate y la métrica.
+func detailWindowName(key string, encounterID int, metric string) string {
 	h := fnv.New32a()
-	_, _ = h.Write([]byte(key))
+	fmt.Fprintf(h, "%s|%d|%s", key, encounterID, metric)
 	return fmt.Sprintf("detail-%08x", h.Sum32())
 }
 
@@ -369,8 +404,8 @@ func (a *App) emitLogf(format string, args ...any) {
 	a.emit("capture:log", msg)
 }
 
-// StopCapture detiene la captura si está en marcha. El log de sesión sigue
-// abierto: abarca toda la ejecución de la app y solo se cierra en el apagado.
+// StopCapture detiene la captura si está en marcha. El log de sesión y el
+// historial de combates siguen vivos: solo se cierran en el apagado.
 func (a *App) StopCapture() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -382,7 +417,15 @@ func (a *App) StopCapture() {
 		a.sn.Stop()
 		a.sn = nil
 	}
-	a.combat.Store(nil)
+	// El modelo de combate no se descarta: el historial debe sobrevivir a un
+	// reinicio de la captura. Se cierra el combate en curso para que el
+	// siguiente golpe abra uno nuevo.
+	if c := a.combat.Load(); c != nil {
+		c.CloseEncounter()
+		now := time.Now()
+		a.emit("combat:update", c.Snapshot(now))
+		a.emit("combat:history", c.History(now))
+	}
 	a.parser.Store(nil)
 }
 

@@ -54,6 +54,15 @@ type Hit struct {
 	NPCSkill    bool
 }
 
+// Metric identifica una de las tres vistas de la sesión.
+type Metric string
+
+const (
+	MetricDamage  Metric = "damage"
+	MetricHealing Metric = "healing"
+	MetricTaken   Metric = "taken"
+)
+
 // MemberStat es el daño agregado por actor tal y como aparece en la tabla de DPS.
 type MemberStat struct {
 	ID     int     `json:"id"`
@@ -68,6 +77,35 @@ type MemberStat struct {
 	Self   bool    `json:"self"`
 }
 
+// MetricStat es una fila de las tablas de curación y daño recibido.
+type MetricStat struct {
+	ID        int     `json:"id"`
+	Key       string  `json:"key"`
+	Name      string  `json:"name"`
+	Class     string  `json:"class"`
+	Color     string  `json:"color"`
+	Value     int64   `json:"value"`
+	PerSecond float64 `json:"perSecond"`
+	Hits      int     `json:"hits"`
+	Crits     int     `json:"crits"`
+	Self      bool    `json:"self"`
+}
+
+// EncounterSummary es una entrada del historial de combates de la sesión.
+type EncounterSummary struct {
+	ID           int     `json:"id"`
+	Title        string  `json:"title"`
+	Boss         string  `json:"boss"`
+	BossID       int     `json:"bossId"`
+	IsBoss       bool    `json:"isBoss"`
+	Active       bool    `json:"active"`
+	StartedAt    int64   `json:"startedAt"`
+	Elapsed      float64 `json:"elapsed"`
+	TotalDamage  int64   `json:"totalDamage"`
+	TotalHealing int64   `json:"totalHealing"`
+	TotalTaken   int64   `json:"totalTaken"`
+}
+
 // SkillStat es el daño agregado de una habilidad concreta para un miembro.
 //
 // Hits cuenta eventos de daño (coincide con MemberStat.Hits). ExtraHits son los
@@ -75,7 +113,9 @@ type MemberStat struct {
 // es la suma de ambos y es lo que se muestra como "golpes" en la interfaz.
 type SkillStat struct {
 	ID        int     `json:"id"`
+	Key       string  `json:"key"`
 	Name      string  `json:"name"`
+	Source    string  `json:"source"`
 	Icon      string  `json:"icon"`
 	Damage    int64   `json:"damage"`
 	DPS       float64 `json:"dps"`
@@ -88,6 +128,8 @@ type SkillStat struct {
 }
 
 // MemberDetail es el desglose por habilidad de un miembro del encuentro actual.
+// Damage y DPS contienen el valor de la métrica seleccionada en Metric, de modo
+// que la misma ventana sirve para daño, curación y daño recibido.
 type MemberDetail struct {
 	Key       string      `json:"key"`
 	Name      string      `json:"name"`
@@ -96,6 +138,7 @@ type MemberDetail struct {
 	Self      bool        `json:"self"`
 	Found     bool        `json:"found"`
 	Active    bool        `json:"active"`
+	Metric    Metric      `json:"metric"`
 	Elapsed   float64     `json:"elapsed"`
 	Damage    int64       `json:"damage"`
 	DPS       float64     `json:"dps"`
@@ -107,17 +150,22 @@ type MemberDetail struct {
 }
 
 // Snapshot es el estado de combate listo para serializar a JSON y enviar al
-// frontend.
+// frontend. Members es la tabla de daño infligido; Healing y Taken son las
+// otras dos pestañas.
 type Snapshot struct {
-	Active  bool         `json:"active"`
-	Elapsed float64      `json:"elapsed"`
-	Boss    string       `json:"boss"`
-	BossID  int          `json:"bossId"`
-	IsBoss  bool         `json:"isBoss"`
-	SelfID  int          `json:"selfId"`
-	Self    string       `json:"self"`
-	Members []MemberStat `json:"members"`
-	Party   []string     `json:"party"`
+	ID        int          `json:"id"`
+	Active    bool         `json:"active"`
+	StartedAt int64        `json:"startedAt"`
+	Elapsed   float64      `json:"elapsed"`
+	Boss      string       `json:"boss"`
+	BossID    int          `json:"bossId"`
+	IsBoss    bool         `json:"isBoss"`
+	SelfID    int          `json:"selfId"`
+	Self      string       `json:"self"`
+	Members   []MemberStat `json:"members"`
+	Healing   []MetricStat `json:"healing"`
+	Taken     []MetricStat `json:"taken"`
+	Party     []string     `json:"party"`
 }
 
 // hitKey identifica un golpe dentro del encuentro. Se guarda también el target
@@ -145,19 +193,34 @@ func (a *hitAcc) add(b *hitAcc) {
 	a.extraHits += b.extraHits
 }
 
-// encounter es una pelea: daño acumulado por actor más su ventana temporal.
+// encounter es una pelea: daño, curación y daño recibido acumulados por actor
+// más su ventana temporal.
 type encounter struct {
+	id    int
 	start time.Time
 	last  time.Time
+	// lastDamage marca el último daño infligido. Es el reloj que decide cuándo
+	// se parte en un combate nuevo; así una curación no fusiona dos peleas.
+	lastDamage time.Time
 
 	damage map[int]int64
 	hits   map[int]int
 	crits  map[int]int
 
+	healing   map[int]int64
+	healHits  map[int]int
+	healCrits map[int]int
+
+	taken      map[int]int64
+	takenHits  map[int]int
+	takenCrits map[int]int
+
 	// breakdown conserva el detalle por actor, habilidad y objetivo. Es la base
 	// del desglose por habilidad y, en una segunda iteración, del desglose por
 	// enemigo.
-	breakdown map[hitKey]*hitAcc
+	breakdown      map[hitKey]*hitAcc
+	healBreakdown  map[hitKey]*hitAcc
+	takenBreakdown map[hitKey]*hitAcc
 
 	// targets guarda el último golpe recibido por cada objetivo. Sirve para
 	// distinguir una fase del mismo enemigo de un pull contra otro enemigo.
@@ -168,16 +231,35 @@ type encounter struct {
 	mainTarget int
 	boss       bool
 	closed     bool
+
+	// entities congela las identidades referenciadas al archivar el encuentro.
+	// El juego reasigna ids al cargar zona, así que un combate archivado no
+	// puede resolver nombres contra el mapa vivo. Es nil mientras está en curso.
+	entities map[int]*Entity
 }
 
-func newEncounter() *encounter {
+func newEncounter(id int) *encounter {
 	return &encounter{
-		damage:    map[int]int64{},
-		hits:      map[int]int{},
-		crits:     map[int]int{},
-		breakdown: map[hitKey]*hitAcc{},
-		targets:   map[int]int64{},
+		id:             id,
+		damage:         map[int]int64{},
+		hits:           map[int]int{},
+		crits:          map[int]int{},
+		healing:        map[int]int64{},
+		healHits:       map[int]int{},
+		healCrits:      map[int]int{},
+		taken:          map[int]int64{},
+		takenHits:      map[int]int{},
+		takenCrits:     map[int]int{},
+		breakdown:      map[hitKey]*hitAcc{},
+		healBreakdown:  map[hitKey]*hitAcc{},
+		takenBreakdown: map[hitKey]*hitAcc{},
+		targets:        map[int]int64{},
 	}
+}
+
+// hasData indica si el encuentro tiene algo que merezca conservarse.
+func (e *encounter) hasData() bool {
+	return len(e.damage) > 0 || len(e.healing) > 0 || len(e.taken) > 0
 }
 
 type partyInfo struct {
@@ -198,7 +280,9 @@ type Combat struct {
 	entities map[int]*Entity
 	byName   map[string]int
 
-	cur *encounter
+	cur     *encounter
+	history []*encounter
+	nextID  int
 
 	selfID int
 
@@ -434,19 +518,49 @@ func (c *Combat) isGroupActorLocked(id int) bool {
 	return false
 }
 
-// AddHit incorpora un evento de daño al encuentro actual. El daño recibido
-// (habilidades de NPC), el auto-daño y el daño de jugadores fuera del grupo se
-// ignoran.
+// isGroupTargetLocked indica si un id es el jugador local, un miembro del grupo
+// o una mascota/summon cuyo dueño pertenece al grupo. Se usa para atribuir
+// curación y daño recibido sin incluir a jugadores ajenos.
+func (c *Combat) isGroupTargetLocked(id int) bool {
+	if id <= 0 {
+		return false
+	}
+	if c.selfID > 0 && id == c.selfID {
+		return true
+	}
+	if _, ok := c.party[id]; ok {
+		return true
+	}
+	if e := c.entities[id]; e != nil && e.Owner > 0 {
+		if c.selfID > 0 && e.Owner == c.selfID {
+			return true
+		}
+		_, ok := c.party[e.Owner]
+		return ok
+	}
+	return false
+}
+
+// AddHit incorpora un evento de combate al encuentro actual: daño infligido,
+// curación realizada o daño recibido según el tipo de golpe. El auto-daño y el
+// daño de jugadores fuera del grupo se ignoran.
 //
-// Si el encuentro actual lleva más de idleTimeout sin actividad, se abre uno
-// nuevo. El total de daño es Damage + ExtraDamage (golpes adicionales del mismo
-// lanzamiento).
+// El daño infligido es el que abre y parte encuentros. Curación y daño recibido
+// se atribuyen al encuentro activo para no fusionar peleas distintas con una
+// curación fuera de combate. El total de daño es Damage + ExtraDamage (golpes
+// adicionales del mismo lanzamiento).
 func (c *Combat) AddHit(ts time.Time, h Hit) {
-	if h.NPCSkill {
+	total := h.Damage + h.ExtraDamage
+	if h.Actor <= 0 {
 		return
 	}
-	total := h.Damage + h.ExtraDamage
-	if total <= 0 || h.Actor <= 0 || h.Actor == h.Target {
+	if h.Actor == h.Target {
+		if h.NPCSkill {
+			return
+		}
+		total = 0 // el auto-daño nunca cuenta; la autocuración sí
+	}
+	if total <= 0 && h.Heal <= 0 {
 		return
 	}
 	if c.OnHit != nil {
@@ -454,13 +568,34 @@ func (c *Combat) AddHit(ts time.Time, h Hit) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if h.NPCSkill {
+		c.addTakenLocked(ts, h, total)
+		return
+	}
 	if !c.isGroupActorLocked(h.Actor) {
 		return
 	}
-	if c.cur == nil || c.cur.closed || c.splitLocked(ts, h.Target) {
-		c.cur = newEncounter()
+
+	var enc *encounter
+	if total > 0 {
+		enc = c.cur
+		if enc == nil || enc.closed || c.splitLocked(ts, h.Target) {
+			c.archiveCurrentLocked()
+			enc = c.newEncounterLocked(ts)
+			c.cur = enc
+		}
+		c.addDamageLocked(enc, ts, h, total)
+	} else {
+		enc = c.liveEncounterLocked(ts)
 	}
-	enc := c.cur
+	if h.Heal > 0 && enc != nil {
+		c.addHealingLocked(enc, ts, h)
+	}
+}
+
+// addDamageLocked acumula un golpe de daño infligido. Requiere c.mu.
+func (c *Combat) addDamageLocked(enc *encounter, ts time.Time, h Hit, total int) {
 	if e := c.entities[h.Target]; e != nil && e.Boss {
 		enc.boss = true
 		if enc.mainTarget == 0 {
@@ -492,6 +627,145 @@ func (c *Combat) AddHit(ts time.Time, h Hit) {
 		enc.start = ts
 	}
 	enc.last = ts
+	enc.lastDamage = ts
+}
+
+// addHealingLocked acumula una curación realizada por un actor del grupo.
+// Requiere c.mu.
+func (c *Combat) addHealingLocked(enc *encounter, ts time.Time, h Hit) {
+	if h.Heal <= 0 || !c.isGroupTargetLocked(h.Target) {
+		return
+	}
+	enc.healing[h.Actor] += int64(h.Heal)
+	enc.healHits[h.Actor]++
+	if h.Crit {
+		enc.healCrits[h.Actor]++
+	}
+
+	key := hitKey{actor: h.Actor, skill: h.Skill, target: h.Target}
+	acc := enc.healBreakdown[key]
+	if acc == nil {
+		acc = &hitAcc{}
+		enc.healBreakdown[key] = acc
+	}
+	acc.damage += int64(h.Heal)
+	acc.hits++
+	if h.Crit {
+		acc.crits++
+	}
+	enc.last = ts
+}
+
+// addTakenLocked acumula un golpe de daño recibido por un miembro del grupo.
+// Requiere c.mu.
+func (c *Combat) addTakenLocked(ts time.Time, h Hit, total int) {
+	if total <= 0 || !c.isGroupTargetLocked(h.Target) {
+		return
+	}
+	enc := c.liveEncounterLocked(ts)
+	if enc == nil {
+		return
+	}
+	enc.taken[h.Target] += int64(total)
+	enc.takenHits[h.Target]++
+	if h.Crit {
+		enc.takenCrits[h.Target]++
+	}
+
+	key := hitKey{actor: h.Actor, skill: h.Skill, target: h.Target}
+	acc := enc.takenBreakdown[key]
+	if acc == nil {
+		acc = &hitAcc{}
+		enc.takenBreakdown[key] = acc
+	}
+	acc.damage += int64(total)
+	acc.hits++
+	if h.Crit {
+		acc.crits++
+	}
+	enc.last = ts
+}
+
+// liveEncounterLocked devuelve el encuentro actual si todavía admite eventos
+// auxiliares (curación o daño recibido). Requiere c.mu.
+func (c *Combat) liveEncounterLocked(ts time.Time) *encounter {
+	enc := c.cur
+	if enc == nil || enc.closed {
+		return nil
+	}
+	gap := ts.Sub(enc.last)
+	if enc.boss {
+		if gap > bossGrace {
+			return nil
+		}
+	} else if gap > idleTimeout {
+		return nil
+	}
+	return enc
+}
+
+// newEncounterLocked crea un encuentro con id secuencial. Requiere c.mu.
+func (c *Combat) newEncounterLocked(start time.Time) *encounter {
+	c.nextID++
+	enc := newEncounter(c.nextID)
+	enc.start = start
+	return enc
+}
+
+// archiveCurrentLocked mueve el encuentro actual al historial. Requiere c.mu.
+func (c *Combat) archiveCurrentLocked() {
+	if c.cur == nil {
+		return
+	}
+	if c.cur.hasData() {
+		c.freezeEntitiesLocked(c.cur)
+		c.history = append(c.history, c.cur)
+	}
+	c.cur = nil
+}
+
+// freezeEntitiesLocked copia por valor cada entidad que el encuentro referencia
+// (actores, objetivos, jefe y, recursivamente, sus dueños). Requiere c.mu.
+func (c *Combat) freezeEntitiesLocked(enc *encounter) {
+	frozen := map[int]*Entity{}
+	var add func(id int)
+	add = func(id int) {
+		if id <= 0 {
+			return
+		}
+		if _, ok := frozen[id]; ok {
+			return
+		}
+		e := c.entities[id]
+		if e == nil {
+			return
+		}
+		cp := *e
+		frozen[id] = &cp
+		add(cp.Owner)
+	}
+	for _, m := range []map[int]int64{enc.damage, enc.healing, enc.taken} {
+		for id := range m {
+			add(id)
+		}
+	}
+	for _, b := range []map[hitKey]*hitAcc{enc.breakdown, enc.healBreakdown, enc.takenBreakdown} {
+		for hk := range b {
+			add(hk.actor)
+			add(hk.target)
+		}
+	}
+	add(enc.mainTarget)
+	enc.entities = frozen
+}
+
+// entsFor devuelve el mapa de entidades con el que resolver un encuentro: el
+// congelado si está archivado o el vivo si está en curso. Requiere c.mu.
+func (c *Combat) entsFor(enc *encounter) map[int]*Entity {
+	if enc != nil && enc.entities != nil {
+		return enc.entities
+	}
+	return c.entities
 }
 
 // splitLocked decide si un golpe debe abrir un encuentro nuevo. Requiere c.mu.
@@ -500,6 +774,7 @@ func (c *Combat) AddHit(ts time.Time, h Hit) {
 // que el grupo no puede atacar; un jefe distinto siempre abre uno nuevo. En
 // encuentros normales, solo se toleran huecos de phaseGrace si el objetivo ya
 // había recibido daño en el mismo encuentro, para no fusionar pulls distintos.
+// El hueco se mide desde el último daño infligido, no desde la última curación.
 func (c *Combat) splitLocked(ts time.Time, target int) bool {
 	enc := c.cur
 	if enc == nil {
@@ -512,7 +787,7 @@ func (c *Combat) splitLocked(ts time.Time, target int) bool {
 			return true
 		}
 	}
-	gap := ts.Sub(enc.last)
+	gap := ts.Sub(enc.lastDamage)
 	if gap <= idleTimeout {
 		return false
 	}
@@ -526,16 +801,27 @@ func (c *Combat) splitLocked(ts time.Time, target int) bool {
 	return true
 }
 
-// ResetEncounter descarta el encuentro actual y el congelado (cambio de zona).
+// ResetEncounter archiva el encuentro actual y lo descarta (cambio de zona).
 func (c *Combat) ResetEncounter() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.cur = nil
+	c.archiveCurrentLocked()
 }
 
-// Snapshot construye la tabla de DPS actual. now es el reloj de pared que decide
-// si el encuentro sigue activo. Un encuentro congelado (terminado) se mantiene
-// visible hasta que empiece el siguiente.
+// CloseEncounter marca el encuentro actual como terminado sin archivarlo. El
+// siguiente golpe abrirá uno nuevo y el anterior pasará al historial. Se usa al
+// detener la captura para que un reinicio no fusione peleas.
+func (c *Combat) CloseEncounter() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.cur != nil {
+		c.cur.closed = true
+	}
+}
+
+// Snapshot construye las tres tablas del encuentro actual. now es el reloj de
+// pared que decide si el encuentro sigue activo. Un encuentro congelado
+// (terminado) se mantiene visible hasta que empiece el siguiente.
 //
 // Agrega por nombre canónico y no por id de entidad: un jugador puede tener
 // varios ids (los summons y hechizos de suelo llevan el nombre del dueño, y el
@@ -544,7 +830,46 @@ func (c *Combat) ResetEncounter() {
 func (c *Combat) Snapshot(now time.Time) Snapshot {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.snapshotLocked(now, c.cur)
+}
 
+// SnapshotFor devuelve un encuentro del historial por id. id <= 0 devuelve el
+// encuentro actual.
+func (c *Combat) SnapshotFor(now time.Time, id int) Snapshot {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.snapshotLocked(now, c.encounterLocked(id))
+}
+
+// History devuelve los combates anteriores, del más reciente al más antiguo.
+func (c *Combat) History(now time.Time) []EncounterSummary {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]EncounterSummary, 0, len(c.history))
+	for i := len(c.history) - 1; i >= 0; i-- {
+		out = append(out, c.summaryLocked(now, c.history[i]))
+	}
+	return out
+}
+
+// encounterLocked busca un encuentro por id. id <= 0 es el actual.
+func (c *Combat) encounterLocked(id int) *encounter {
+	if id <= 0 {
+		return c.cur
+	}
+	if c.cur != nil && c.cur.id == id {
+		return c.cur
+	}
+	for _, enc := range c.history {
+		if enc.id == id {
+			return enc
+		}
+	}
+	return nil
+}
+
+// snapshotLocked construye el snapshot de un encuentro concreto. Requiere c.mu.
+func (c *Combat) snapshotLocked(now time.Time, enc *encounter) Snapshot {
 	snap := Snapshot{SelfID: c.selfID}
 	if self := c.entities[c.selfID]; self != nil {
 		snap.Self = self.Name
@@ -553,18 +878,20 @@ func (c *Combat) Snapshot(now time.Time) Snapshot {
 		snap.Party = append(snap.Party, name)
 	}
 	sort.Strings(snap.Party)
-
-	rows, enc, active, elapsed := c.rowsLocked(now)
 	if enc == nil {
 		return snap
 	}
-	snap.Active = active
-	snap.Elapsed = elapsed
+
+	snap.ID = enc.id
+	if !enc.start.IsZero() {
+		snap.StartedAt = enc.start.UnixMilli()
+	}
+	snap.Active, snap.Elapsed = c.windowLocked(now, enc, enc == c.cur)
 	if enc.boss && enc.mainTarget > 0 {
 		snap.IsBoss = true
 		snap.BossID = enc.mainTarget
 		name := ""
-		if e := c.entities[enc.mainTarget]; e != nil {
+		if e := c.entsFor(enc)[enc.mainTarget]; e != nil {
 			name = e.Name
 		}
 		if name != "" {
@@ -573,6 +900,8 @@ func (c *Combat) Snapshot(now time.Time) Snapshot {
 			snap.Boss = "Jefe #" + itoa(enc.mainTarget)
 		}
 	}
+
+	rows := c.rowsFromLocked(c.entsFor(enc), enc.damage, enc.hits, enc.crits, false)
 	for _, r := range rows {
 		cls, color := ClassName(r.class)
 		if cls == "" {
@@ -597,26 +926,106 @@ func (c *Combat) Snapshot(now time.Time) Snapshot {
 		}
 		return snap.Members[i].Name < snap.Members[j].Name
 	})
+	snap.Healing = c.metricStatsLocked(c.entsFor(enc), enc.healing, enc.healHits, enc.healCrits, false, snap.Elapsed)
+	snap.Taken = c.metricStatsLocked(c.entsFor(enc), enc.taken, enc.takenHits, enc.takenCrits, true, snap.Elapsed)
 	return snap
 }
 
-// MemberDetail devuelve el desglose por habilidad de la fila canónica key. Si el
-// encuentro no existe o la fila no está presente, Found es false.
+// windowLocked calcula si un encuentro sigue activo y su duración. current
+// distingue el encuentro en curso de uno archivado. Requiere c.mu.
+func (c *Combat) windowLocked(now time.Time, enc *encounter, current bool) (bool, float64) {
+	active := false
+	if current && !enc.closed {
+		active = now.Sub(enc.last) < idleTimeout
+		if enc.boss {
+			active = now.Sub(enc.last) < bossGrace
+		}
+	}
+	elapsed := enc.last.Sub(enc.start).Seconds()
+	if elapsed < 0.001 {
+		elapsed = 0.001
+	}
+	return active, elapsed
+}
+
+// summaryLocked construye una entrada del historial. Requiere c.mu.
+func (c *Combat) summaryLocked(now time.Time, enc *encounter) EncounterSummary {
+	_, elapsed := c.windowLocked(now, enc, false)
+	s := EncounterSummary{
+		ID:           enc.id,
+		Title:        "Fight",
+		IsBoss:       enc.boss,
+		Elapsed:      elapsed,
+		TotalDamage:  sumValues(enc.damage),
+		TotalHealing: sumValues(enc.healing),
+		TotalTaken:   sumValues(enc.taken),
+	}
+	if !enc.start.IsZero() {
+		s.StartedAt = enc.start.UnixMilli()
+	}
+	if enc.boss && enc.mainTarget > 0 {
+		s.BossID = enc.mainTarget
+		name := ""
+		if e := c.entsFor(enc)[enc.mainTarget]; e != nil {
+			name = e.Name
+		}
+		if name == "" {
+			name = "Jefe #" + itoa(enc.mainTarget)
+		}
+		s.Boss = name
+		s.Title = name
+	}
+	return s
+}
+
+// sumValues suma los valores de un mapa de acumuladores.
+func sumValues(values map[int]int64) int64 {
+	var total int64
+	for _, v := range values {
+		total += v
+	}
+	return total
+}
+
+// MemberDetail devuelve el desglose de daño del encuentro actual.
 func (c *Combat) MemberDetail(now time.Time, key string) MemberDetail {
+	return c.MemberDetailFor(now, 0, key, MetricDamage)
+}
+
+// MemberDetailFor devuelve el desglose por habilidad de la fila canónica key
+// para la métrica y el encuentro indicados. id <= 0 usa el encuentro actual.
+func (c *Combat) MemberDetailFor(now time.Time, id int, key string, metric Metric) MemberDetail {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
+	if metric != MetricHealing && metric != MetricTaken {
+		metric = MetricDamage
+	}
 	detail := MemberDetail{
 		Key:    key,
+		Metric: metric,
 		Active: false,
 		Skills: make([]SkillStat, 0),
 	}
-	rows, enc, active, elapsed := c.rowsLocked(now)
+	enc := c.encounterLocked(id)
 	if enc == nil {
 		return detail
 	}
-	detail.Active = active
-	detail.Elapsed = elapsed
+	detail.Active, detail.Elapsed = c.windowLocked(now, enc, enc == c.cur)
+	ents := c.entsFor(enc)
+
+	var rows map[string]*aggRow
+	var breakdown map[hitKey]*hitAcc
+	switch metric {
+	case MetricHealing:
+		rows = c.rowsFromLocked(ents, enc.healing, enc.healHits, enc.healCrits, false)
+		breakdown = enc.healBreakdown
+	case MetricTaken:
+		rows = c.rowsFromLocked(ents, enc.taken, enc.takenHits, enc.takenCrits, true)
+		breakdown = enc.takenBreakdown
+	default:
+		rows = c.rowsFromLocked(ents, enc.damage, enc.hits, enc.crits, false)
+		breakdown = enc.breakdown
+	}
 
 	r := rows[key]
 	if r == nil {
@@ -630,26 +1039,41 @@ func (c *Combat) MemberDetail(now time.Time, key string) MemberDetail {
 	}
 	detail.Self = r.self
 	detail.Damage = r.damage
-	detail.DPS = float64(r.damage) / elapsed
+	detail.DPS = float64(r.damage) / detail.Elapsed
 	detail.Hits = r.hits
 	detail.Crits = r.crits
 
-	bySkill := map[int]*hitAcc{}
-	for hk, acc := range enc.breakdown {
-		actorKey, _ := c.actorKeyLocked(c.entities[hk.actor], hk.actor)
-		if actorKey != key {
+	// En daño recibido se agrupa por fuente y habilidad; en daño y curación
+	// basta con la habilidad porque el miembro ya es el actor.
+	type skillKey struct {
+		id    int
+		actor int
+	}
+	bySkill := map[skillKey]*hitAcc{}
+	for hk, acc := range breakdown {
+		var memberKey string
+		if metric == MetricTaken {
+			memberKey, _ = victimKey(ents, hk.target)
+		} else {
+			memberKey, _ = actorKey(ents, ents[hk.actor], hk.actor)
+		}
+		if memberKey != key {
 			continue
 		}
-		dst := bySkill[hk.skill]
+		sk := skillKey{id: hk.skill}
+		if metric == MetricTaken {
+			sk.actor = hk.actor
+		}
+		dst := bySkill[sk]
 		if dst == nil {
 			dst = &hitAcc{}
-			bySkill[hk.skill] = dst
+			bySkill[sk] = dst
 		}
 		dst.add(acc)
 	}
 
 	detail.Skills = make([]SkillStat, 0, len(bySkill))
-	for id, acc := range bySkill {
+	for sk, acc := range bySkill {
 		share := 0.0
 		if r.damage > 0 {
 			share = float64(acc.damage) / float64(r.damage) * 100
@@ -661,19 +1085,25 @@ func (c *Combat) MemberDetail(now time.Time, key string) MemberDetail {
 		}
 		detail.ExtraHits += acc.extraHits
 		detail.TotalHits += totalHits
-		detail.Skills = append(detail.Skills, SkillStat{
-			ID:        id,
-			Name:      SkillName(id),
-			Icon:      SkillIcon(id),
+		stat := SkillStat{
+			ID:        sk.id,
+			Key:       itoa(sk.id),
+			Name:      SkillName(sk.id),
+			Icon:      SkillIcon(sk.id),
 			Damage:    acc.damage,
-			DPS:       float64(acc.damage) / elapsed,
+			DPS:       float64(acc.damage) / detail.Elapsed,
 			Share:     share,
 			Hits:      acc.hits,
 			ExtraHits: acc.extraHits,
 			TotalHits: totalHits,
 			Crits:     acc.crits,
 			AvgHit:    avgHit,
-		})
+		}
+		if metric == MetricTaken {
+			stat.Key = itoa(sk.actor) + ":" + itoa(sk.id)
+			_, stat.Source = actorKey(ents, ents[sk.actor], sk.actor)
+		}
+		detail.Skills = append(detail.Skills, stat)
 	}
 	sort.Slice(detail.Skills, func(i, j int) bool {
 		if detail.Skills[i].Damage != detail.Skills[j].Damage {
@@ -682,41 +1112,40 @@ func (c *Combat) MemberDetail(now time.Time, key string) MemberDetail {
 		if detail.Skills[i].Name != detail.Skills[j].Name {
 			return detail.Skills[i].Name < detail.Skills[j].Name
 		}
-		return detail.Skills[i].ID < detail.Skills[j].ID
+		if detail.Skills[i].ID != detail.Skills[j].ID {
+			return detail.Skills[i].ID < detail.Skills[j].ID
+		}
+		return detail.Skills[i].Key < detail.Skills[j].Key
 	})
 	return detail
 }
 
-// rowsLocked agrega el encuentro actual por nombre canónico y devuelve también
-// la ventana temporal usada para DPS. Requiere c.mu.
-func (c *Combat) rowsLocked(now time.Time) (map[string]*aggRow, *encounter, bool, float64) {
-	enc := c.cur
-	if enc == nil {
-		return nil, nil, false, 0
-	}
-	active := !enc.closed && now.Sub(enc.last) < idleTimeout
-	if enc.boss && !enc.closed {
-		active = now.Sub(enc.last) < bossGrace
-	}
-	elapsed := enc.last.Sub(enc.start).Seconds()
-	if elapsed < 0.001 {
-		elapsed = 0.001
-	}
-
+// rowsFromLocked agrega un mapa de valores por entidad a filas canónicas.
+// resolveVictim indica que los ids son víctimas y las mascotas se suman a su
+// dueño. Requiere c.mu.
+func (c *Combat) rowsFromLocked(ents map[int]*Entity, values map[int]int64, hits, crits map[int]int, resolveVictim bool) map[string]*aggRow {
 	rows := map[string]*aggRow{}
-	for id, dmg := range enc.damage {
-		e := c.entities[id]
-		key, name := c.actorKeyLocked(e, id)
+	for id, v := range values {
+		if v <= 0 {
+			continue
+		}
+		e := ents[id]
+		key, name := metricKey(ents, e, id, resolveVictim)
 		r := rows[key]
 		if r == nil {
 			r = &aggRow{key: key, id: id, name: name}
 			rows[key] = r
 		}
-		r.damage += dmg
-		r.hits += enc.hits[id]
-		r.crits += enc.crits[id]
+		r.damage += v
+		r.hits += hits[id]
+		r.crits += crits[id]
 		if e == nil {
 			continue
+		}
+		if resolveVictim && e.Owner > 0 {
+			if owner := ents[e.Owner]; owner != nil {
+				e = owner
+			}
 		}
 		if e.Self {
 			r.self = true
@@ -725,7 +1154,7 @@ func (c *Combat) rowsLocked(now time.Time) (map[string]*aggRow, *encounter, bool
 		// de uno de sus summons.
 		if realPlayer := e.IsPlayer && !e.NPC; realPlayer && !r.player {
 			r.player = true
-			r.id = id
+			r.id = e.ID
 			if e.Class != 0 {
 				r.class = e.Class
 			}
@@ -733,7 +1162,56 @@ func (c *Combat) rowsLocked(now time.Time) (map[string]*aggRow, *encounter, bool
 			r.class = e.Class
 		}
 	}
-	return rows, enc, active, elapsed
+	return rows
+}
+
+// metricKey resuelve la clave canónica de una entidad contra el mapa ents. Para
+// daño recibido las mascotas se suman a su dueño.
+func metricKey(ents map[int]*Entity, e *Entity, id int, resolveVictim bool) (key, name string) {
+	if resolveVictim && e != nil && e.Owner > 0 {
+		if owner := ents[e.Owner]; owner != nil {
+			e = owner
+			id = owner.ID
+		}
+	}
+	return actorKey(ents, e, id)
+}
+
+// victimKey resuelve la víctima de un golpe a su dueño si es una mascota.
+func victimKey(ents map[int]*Entity, id int) (key, name string) {
+	return metricKey(ents, ents[id], id, true)
+}
+
+// metricStatsLocked construye y ordena una tabla de curación o daño recibido.
+// Requiere c.mu.
+func (c *Combat) metricStatsLocked(ents map[int]*Entity, values map[int]int64, hits, crits map[int]int, resolveVictim bool, elapsed float64) []MetricStat {
+	rows := c.rowsFromLocked(ents, values, hits, crits, resolveVictim)
+	out := make([]MetricStat, 0, len(rows))
+	for _, r := range rows {
+		cls, color := ClassName(r.class)
+		if cls == "" {
+			cls = "?"
+		}
+		out = append(out, MetricStat{
+			ID:        r.id,
+			Key:       r.key,
+			Name:      r.name,
+			Class:     cls,
+			Color:     color,
+			Value:     r.damage,
+			PerSecond: float64(r.damage) / elapsed,
+			Hits:      r.hits,
+			Crits:     r.crits,
+			Self:      r.self,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Value != out[j].Value {
+			return out[i].Value > out[j].Value
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
 }
 
 // aggRow acumula el daño de todas las entidades que resuelven al mismo nombre
@@ -750,16 +1228,16 @@ type aggRow struct {
 	crits  int
 }
 
-// actorKeyLocked asigna un actor a su fila canónica en la tabla. Los summons y
+// actorKey asigna un actor a su fila canónica en la tabla. Los summons y
 // hechizos de suelo (entidades NPC con el nombre de su dueño) resuelven al
 // nombre del dueño; las entidades sin nombre caen a su id.
-func (c *Combat) actorKeyLocked(e *Entity, id int) (key, name string) {
+func actorKey(ents map[int]*Entity, e *Entity, id int) (key, name string) {
 	if e != nil {
 		if e.Name != "" {
 			return "n:" + e.Name, e.Name
 		}
 		if e.Owner > 0 {
-			if o := c.entities[e.Owner]; o != nil && o.Name != "" {
+			if o := ents[e.Owner]; o != nil && o.Name != "" {
 				return "n:" + o.Name, o.Name
 			}
 		}
