@@ -36,6 +36,13 @@ export function CaptureStatus(): $CancellablePromise<$models.CaptureState> {
 }
 
 /**
+ * ClickThrough indica si la ventana principal deja pasar los clics al juego.
+ */
+export function ClickThrough(): $CancellablePromise<boolean> {
+    return $Call.ByID(3311220460);
+}
+
+/**
  * CombatHistory devuelve los combates anteriores de la sesión.
  */
 export function CombatHistory(): $CancellablePromise<aion2$0.EncounterSummary[] | null> {
@@ -74,6 +81,15 @@ export function OpenMemberWindow(encounterID: number, key: string, name: string,
 }
 
 /**
+ * SetClickThrough activa o desactiva el modo click-through de la ventana
+ * principal: con él activo la ventana ignora el ratón y los clics llegan al
+ * juego. Se desactiva con el atajo global Ctrl+Alt+M o desde la bandeja.
+ */
+export function SetClickThrough(on: boolean): $CancellablePromise<void> {
+    return $Call.ByID(2851556034, on);
+}
+
+/**
  * StartCapture arranca la captura pasiva de paquetes. No hace nada si ya está en
  * marcha. Cualquier error (p. ej. Npcap no instalado) se guarda para que la
  * interfaz lo muestre.
@@ -88,4 +104,11 @@ export function StartCapture(): $CancellablePromise<void> {
  */
 export function StopCapture(): $CancellablePromise<void> {
     return $Call.ByID(2057482729);
+}
+
+/**
+ * ToggleClickThrough alterna el modo click-through.
+ */
+export function ToggleClickThrough(): $CancellablePromise<void> {
+    return $Call.ByID(2867525164);
 }

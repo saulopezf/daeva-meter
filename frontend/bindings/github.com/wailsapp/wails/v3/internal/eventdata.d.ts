@@ -19,6 +19,7 @@ declare module "@wailsio/runtime" {
             "capture:stats": sniffer$0.Stats;
             "combat:history": aion2$0.EncounterSummary[] | null;
             "combat:update": aion2$0.Snapshot;
+            "ui:clickthrough": boolean;
         }
     }
 }

@@ -24,6 +24,11 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+// trayIcon es el icono de la aplicación que se muestra en la bandeja del sistema.
+//
+//go:embed build/appicon.png
+var trayIcon []byte
+
 // init registra el tipo de dato de los eventos personalizados. El generador de
 // bindings lo usa para producir una API TypeScript tipada para cada evento.
 func init() {
@@ -31,6 +36,7 @@ func init() {
 	application.RegisterEvent[string]("capture:log")
 	application.RegisterEvent[aion2.Snapshot]("combat:update")
 	application.RegisterEvent[[]aion2.EncounterSummary]("combat:history")
+	application.RegisterEvent[bool]("ui:clickthrough")
 }
 
 // main es el punto de entrada de la aplicación Wails. Crea la aplicación,
@@ -57,20 +63,46 @@ func main() {
 	// de app.Run(), de modo que ServiceStartup ya puede usarla.
 	backend.app = app
 
-	// La ventana es frameless (el marco lo dibuja el frontend) y se mantiene
-	// siempre encima para poder consultar el DPS mientras se juega.
+	// La ventana es un overlay frameless (el marco lo dibuja el frontend) con
+	// fondo transparente: el frontend pinta un fondo semitransparente cuya
+	// opacidad regula el usuario. Se mantiene siempre encima del juego.
 	mainWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "main",
 		Title:            "daeva-meter",
-		Width:            480,
-		Height:           144,
-		MinWidth:         360,
-		MinHeight:        120,
+		Width:            300,
+		Height:           120,
+		MinWidth:         240,
+		MinHeight:        60,
 		Frameless:        true,
 		AlwaysOnTop:      true,
-		BackgroundColour: application.NewRGB(16, 21, 31),
+		BackgroundType:   application.BackgroundTypeTransparent,
+		BackgroundColour: application.NewRGBA(0, 0, 0, 0),
 		URL:              "/",
 	})
+	backend.mainWindow = mainWindow
+
+	// Icono de bandeja: es la vía (junto al atajo Ctrl+Alt+M) para salir del
+	// modo click-through, en el que la ventana no recibe clics.
+	trayMenu := application.NewMenu()
+	backend.trayToggle = trayMenu.AddCheckbox("Click-through (Ctrl+Alt+M)", false)
+	backend.trayToggle.OnClick(func(*application.Context) {
+		backend.ToggleClickThrough()
+	})
+	trayMenu.Add("Mostrar / ocultar").OnClick(func(*application.Context) {
+		if mainWindow.IsVisible() {
+			mainWindow.Hide()
+		} else {
+			mainWindow.Show()
+		}
+	})
+	trayMenu.AddSeparator()
+	trayMenu.Add("Salir").OnClick(func(*application.Context) {
+		mainWindow.Close()
+	})
+	tray := app.SystemTray.New()
+	tray.SetIcon(trayIcon)
+	tray.SetTooltip("daeva-meter")
+	tray.SetMenu(trayMenu)
 	// Al cerrar la ventana principal se cierran también las ventanas de detalle.
 	//
 	// No llamamos a app.Quit() aquí: Quit destruye el bucle de mensajes mientras

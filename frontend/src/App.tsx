@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Events } from '@wailsio/runtime';
 import { App as Backend } from '../bindings/daeva-meter';
+import { OverlayControls } from './components/OverlayControls';
 import { StatBar } from './components/StatBar';
 import { TitleBar } from './components/TitleBar';
 import { fmtClock, fmtCompact } from './format';
@@ -13,6 +14,7 @@ import type {
   Stats,
 } from './types';
 import { useDynamicWindowHeight } from './useDynamicWindowHeight';
+import { useOpacity } from './useOpacity';
 
 // Valores por defecto mientras llega el primer estado desde el backend.
 const EMPTY_STATS: Stats = {
@@ -43,10 +45,10 @@ const EMPTY_COMBAT: CombatSnapshot = {
   party: [],
 };
 
-const TABS: { id: Metric; label: string }[] = [
-  { id: 'damage', label: 'Damage' },
-  { id: 'healing', label: 'Healing' },
-  { id: 'taken', label: 'Damage Taken' },
+const TABS: { id: Metric; label: string; title: string }[] = [
+  { id: 'damage', label: 'DMG', title: 'Damage' },
+  { id: 'healing', label: 'HEAL', title: 'Healing' },
+  { id: 'taken', label: 'TAKEN', title: 'Damage taken' },
 ];
 
 // Estado global de la captura derivado del backend y de las estadísticas.
@@ -84,19 +86,6 @@ function emptyLabel(metric: Metric): string {
   return 'waiting for combat data…';
 }
 
-function historyLabel(entry: EncounterSummary): string {
-  const kind = entry.isBoss ? entry.boss || 'Boss' : 'Fight';
-  const time =
-    entry.startedAt > 0
-      ? new Date(entry.startedAt).toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false,
-        })
-      : '';
-  return `${kind} · ${fmtClock(entry.elapsed)}${time ? ` · ${time}` : ''}`;
-}
-
 // App es la raíz de la interfaz. Consulta el estado inicial, se suscribe a los
 // eventos del backend y pinta la cabecera, las pestañas de métricas, la tabla y
 // el historial de combates de la sesión.
@@ -110,6 +99,8 @@ export default function App() {
   const [tab, setTab] = useState<Metric>('damage');
   const [history, setHistory] = useState<EncounterSummary[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
+  const [opacity, setOpacity] = useOpacity();
+  const [clickThrough, setClickThrough] = useState(false);
 
   // pushLog conserva solo las últimas 5 líneas de log para el pie.
   const pushLog = useCallback((msg: string) => {
@@ -124,6 +115,7 @@ export default function App() {
       setStats(s.stats);
       setLive(await Backend.CombatState());
       setHistory((await Backend.CombatHistory()) ?? []);
+      setClickThrough(await Backend.ClickThrough());
     } catch (e) {
       pushLog(String(e));
     }
@@ -140,11 +132,13 @@ export default function App() {
     const offHistory = Events.On('combat:history', (ev) =>
       setHistory(ev.data as EncounterSummary[]),
     );
+    const offClick = Events.On('ui:clickthrough', (ev) => setClickThrough(ev.data as boolean));
     return () => {
       offStats();
       offLog();
       offCombat();
       offHistory();
+      offClick();
     };
   }, [refresh, pushLog]);
 
@@ -198,6 +192,8 @@ export default function App() {
   const rows = metricRows(view, tab);
   // Máximo del ritmo para escalar las barras de forma relativa al primero.
   const maxRate = Math.max(...rows.map((m) => m.perSecond), 1);
+  const total = rows.reduce((sum, m) => sum + m.value, 0);
+  const totalRate = rows.reduce((sum, m) => sum + m.perSecond, 0);
   const lastLog = logs.length > 0 ? logs[logs.length - 1] : '';
   // El panel de diagnóstico solo se pinta en compilaciones de desarrollo. Vite
   // elimina el bloque del bundle de producción, y el backend confirma el modo
@@ -213,9 +209,69 @@ export default function App() {
         : 'idle';
   const fightKind = view.isBoss ? 'boss' : 'fight';
 
+  const toggleClickThrough = (on: boolean) => {
+    setClickThrough(on);
+    void Backend.SetClickThrough(on).catch((e: unknown) => pushLog(String(e)));
+  };
+
   return (
-    <div className="app app-auto" ref={appRef}>
-      <TitleBar />
+    <div
+      className={`app app-auto overlay${clickThrough ? ' overlay-locked' : ''}`}
+      ref={appRef}
+    >
+      <TitleBar
+        actions={
+          <OverlayControls
+            history={history}
+            selectedID={selectedID}
+            onSelect={(id) => void selectEncounter(id)}
+            opacity={opacity}
+            onOpacity={setOpacity}
+            clickThrough={clickThrough}
+            onClickThrough={toggleClickThrough}
+          />
+        }
+      >
+        <div className={`fight-bar fight-bar-${fightState}`}>
+          <span
+            className={`fight-kind fight-kind-${fightState === 'idle' ? 'idle' : fightKind}`}
+            title={fightState === 'idle' ? 'Idle' : view.isBoss ? 'Boss' : 'Fight'}
+          >
+            {fightState === 'idle' ? (
+              <i className="idle-dot" />
+            ) : view.isBoss ? (
+              <svg className="fight-icon" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M3 10.5V5l3 2 2-3.5 2 3.5 3-2v5.5" />
+                <path d="M3 12.5h10" />
+              </svg>
+            ) : (
+              <svg className="fight-icon" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M2.5 2.5l8 8M10.5 10.5l3 3M13.5 2.5l-8 8M5.5 10.5l-3 3" />
+              </svg>
+            )}
+          </span>
+          <span className="fight-name" title={view.boss || undefined}>
+            {isHistory && <span className="hist-tag">HIST</span>}
+            {view.isBoss && view.boss
+              ? view.boss
+              : fightState === 'idle'
+                ? 'daeva-meter'
+                : 'Fight'}
+          </span>
+          <span className="fight-time">
+            {fmtClock(view.elapsed)}
+            {!isHistory && view.active && <i className="fight-live-dot" />}
+          </span>
+          {clickThrough && (
+            <span className="locked" title="Click-through on — Ctrl+Alt+M to unlock">
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <rect x="3.5" y="7" width="9" height="6.5" rx="1.2" />
+                <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" />
+              </svg>
+            </span>
+          )}
+        </div>
+      </TitleBar>
 
       {dev && (
         <details className="dev-panel">
@@ -249,47 +305,6 @@ export default function App() {
 
       {state?.error && <div className="error">{state.error}</div>}
 
-      <div className={`fight-bar fight-bar-${fightState}`}>
-        <span className={`fight-kind fight-kind-${fightState === 'idle' ? 'idle' : fightKind}`}>
-          {fightState !== 'idle' &&
-            (view.isBoss ? (
-              <svg className="fight-icon" viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M3 10.5V5l3 2 2-3.5 2 3.5 3-2v5.5" />
-                <path d="M3 12.5h10" />
-              </svg>
-            ) : (
-              <svg className="fight-icon" viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M2.5 2.5l8 8M10.5 10.5l3 3M13.5 2.5l-8 8M5.5 10.5l-3 3" />
-              </svg>
-            ))}
-          {fightState === 'idle' ? 'IDLE' : view.isBoss ? 'BOSS' : 'FIGHT'}
-        </span>
-        {view.isBoss && view.boss && (
-          <span className="fight-boss" title={view.boss}>
-            {view.boss}
-          </span>
-        )}
-        <span className="fight-time">
-          {fmtClock(view.elapsed)}
-          {!isHistory && view.active && <i className="fight-live-dot" />}
-        </span>
-        <label className="history-picker" title="Combates anteriores de la sesión">
-          <span className="history-label">{isHistory ? 'HISTORY' : 'LIVE'}</span>
-          <select
-            className="history-select"
-            value={String(selectedID)}
-            onChange={(e) => void selectEncounter(Number(e.target.value))}
-          >
-            <option value="0">Live</option>
-            {history.map((entry) => (
-              <option key={entry.id} value={String(entry.id)}>
-                {historyLabel(entry)}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
       <div className="tabs" role="tablist" aria-label="Combat metrics">
         {TABS.map((item) => (
           <button
@@ -298,11 +313,17 @@ export default function App() {
             role="tab"
             aria-selected={tab === item.id}
             className={`tab${tab === item.id ? ' tab-active' : ''}`}
+            title={item.title}
             onClick={() => setTab(item.id)}
           >
             {item.label}
           </button>
         ))}
+        {rows.length > 0 && (
+          <span className="group-total" title="Group total per second · group total">
+            <b>{fmtCompact(totalRate)}</b>/s · {fmtCompact(total)}
+          </span>
+        )}
       </div>
 
       <main className="rows">
@@ -317,6 +338,7 @@ export default function App() {
               member={m}
               rank={i + 1}
               maxRate={maxRate}
+              share={total > 0 ? (m.value / total) * 100 : 0}
               metric={tab}
               onSelect={(member) => void openMember(member)}
             />

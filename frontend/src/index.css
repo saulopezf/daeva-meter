@@ -1,11 +1,22 @@
+/* Las ventanas son transparentes a nivel nativo: el fondo lo pinta .app con un
+   alfa (--alpha) que regula el usuario. Solo los fondos usan alfa; el texto se
+   mantiene opaco y con sombra para leerse sobre cualquier escena del juego. */
 :root {
   color-scheme: dark;
-  --bg: #10151f;
-  --panel: #151b28;
-  --line: #232b3d;
-  --text: #e8ecf5;
-  --dim: #8b94a7;
+  --alpha: 0.75;
+  --bg: rgb(10 14 21 / var(--alpha));
+  --panel: rgb(20 26 38 / calc(var(--alpha) * 0.9));
+  --surface: rgb(255 255 255 / 0.05);
+  --surface-hi: rgb(255 255 255 / 0.1);
+  --line: rgb(255 255 255 / 0.08);
+  --line-hi: rgb(255 255 255 / 0.18);
+  --text: #eef1f7;
+  --dim: #9aa3b5;
+  --faint: #6b7487;
+  --green: #3ddc84;
+  --red: #ff8d8d;
   --mono: ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', monospace;
+  --shadow: 0 1px 1px rgb(0 0 0 / 0.75), 0 0 3px rgb(0 0 0 / 0.45);
 }
 
 * {
@@ -18,20 +29,25 @@ html,
 body,
 #root {
   height: 100%;
+  background: transparent;
 }
 
 body {
-  background: var(--bg);
   color: var(--text);
-  font: 13px/1.35 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font: 12px/1.3 'Segoe UI', system-ui, -apple-system, sans-serif;
   overflow: hidden;
   user-select: none;
+  text-shadow: var(--shadow);
 }
 
 .app {
   display: flex;
   flex-direction: column;
   height: 100%;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 /* La ventana principal ajusta su altura al contenido. El límite superior lo
@@ -46,21 +62,24 @@ body {
   overflow-y: auto;
 }
 
-.app-auto .empty {
-  padding: 16px 0;
-}
+/* ---------- Barra de título ---------- */
 
-/* Barra de título propia de las ventanas frameless. Se integra con el fondo de
-   la app y solo contiene la marca y la cruz de cerrar. */
 .titlebar {
   --wails-draggable: drag;
   display: flex;
   align-items: center;
+  gap: 4px;
   flex: none;
-  height: 32px;
-  padding: 0 6px 0 12px;
-  background: var(--bg);
+  height: 26px;
+  padding: 0 3px 0 8px;
   user-select: none;
+}
+
+.titlebar-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
 }
 
 .titlebar-brand {
@@ -78,73 +97,496 @@ body {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #3ddc84;
+  background: var(--green);
   box-shadow: 0 0 6px #3ddc8488;
 }
 
-.titlebar-close {
+.titlebar-actions {
   --wails-draggable: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex: none;
+}
+
+/* Los iconos quedan atenuados y se iluminan al pasar por la ventana. */
+.icon-btn {
+  position: relative;
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 22px;
-  margin-left: auto;
+  width: 20px;
+  height: 20px;
   border: none;
   border-radius: 4px;
   background: transparent;
   color: var(--dim);
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  opacity: 0.5;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
 
-.titlebar-close svg {
+.app:hover .icon-btn {
+  opacity: 1;
+}
+
+.icon-btn svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
   stroke: currentColor;
-  stroke-width: 1.5;
+  stroke-width: 1.4;
   stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
-.titlebar-close:hover {
-  background: #3a1620;
-  color: #ff9b9b;
+.icon-btn svg .fill {
+  fill: currentColor;
+  stroke: none;
 }
 
-.titlebar-close:focus-visible {
-  outline: 1px solid #4c5a75;
+.icon-btn:hover {
+  background: var(--surface-hi);
+  color: var(--text);
+}
+
+.icon-btn-on {
+  color: #8fb3ff;
+  opacity: 1;
+}
+
+.icon-btn:focus-visible {
+  outline: 1px solid var(--line-hi);
   outline-offset: -1px;
 }
 
-header {
+.titlebar-close svg {
+  width: 10px;
+  height: 10px;
+}
+
+.titlebar-close:hover {
+  background: rgb(255 80 100 / 0.22);
+  color: var(--red);
+}
+
+/* El <select> de historial es invisible y cubre el icono: al pulsar el icono se
+   abre el desplegable nativo. */
+.history-select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  font: 11px var(--mono);
+  color: var(--text);
+  background: #151b28;
+}
+
+.opacity-wrap {
+  position: relative;
+}
+
+.opacity-pop {
+  position: absolute;
+  top: 24px;
+  right: -40px;
+  z-index: 10;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 12px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--line);
+  gap: 8px;
+  padding: 6px 9px;
+  border: 1px solid var(--line-hi);
+  border-radius: 6px;
+  background: #141a26f2;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.5);
+}
+
+.opacity-pop input[type='range'] {
+  width: 110px;
+  accent-color: #8fb3ff;
+  cursor: pointer;
+}
+
+.opacity-value {
+  width: 30px;
+  color: var(--dim);
+  font: 10px var(--mono);
+  text-align: right;
+}
+
+/* ---------- Estado del combate (dentro de la barra de título) ---------- */
+
+.fight-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+}
+
+.fight-kind {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 4px;
+  color: var(--dim);
+}
+
+.fight-kind-boss {
+  color: var(--red);
+  background: rgb(255 90 110 / 0.16);
+}
+
+.fight-kind-fight {
+  color: #6ee7a0;
+  background: rgb(60 220 130 / 0.14);
+}
+
+.fight-icon {
+  width: 11px;
+  height: 11px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.idle-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+
+.fight-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fight-bar-idle .fight-name {
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.hist-tag {
+  margin-right: 5px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgb(143 179 255 / 0.2);
+  color: #bcd0ff;
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  vertical-align: 1px;
+}
+
+.fight-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  font: 600 12px var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.fight-bar-ended .fight-time,
+.fight-bar-ended .fight-kind {
+  opacity: 0.6;
+}
+
+.fight-bar-idle .fight-time {
+  color: var(--faint);
+}
+
+.fight-live-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 6px #3ddc84aa;
+  animation: fight-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes fight-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.35;
+    transform: scale(0.75);
+  }
+}
+
+.locked {
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: #8fb3ff;
+}
+
+.locked svg {
+  width: 11px;
+  height: 11px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+/* En modo click-through la ventana no recibe el ratón: se ocultan los
+   controles que no se pueden usar. */
+.overlay-locked .titlebar-actions {
+  display: none;
+}
+
+/* ---------- Pestañas de métrica ---------- */
+
+.tabs {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 2px;
+  padding: 0 6px 3px;
+}
+
+.tab {
+  height: 17px;
+  padding: 0 7px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--faint);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-shadow: var(--shadow);
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.tab-active {
+  color: var(--text);
+  background: var(--surface-hi);
+}
+
+.tab:focus-visible {
+  outline: 1px solid var(--line-hi);
+  outline-offset: -1px;
+}
+
+.group-total {
+  margin-left: auto;
+  padding-right: 2px;
+  color: var(--dim);
+  font: 10px var(--mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.group-total b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ---------- Filas ---------- */
+
+.rows {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 4px 4px;
+}
+
+.rows::-webkit-scrollbar {
+  width: 4px;
+}
+
+.rows::-webkit-scrollbar-thumb {
+  background: var(--line-hi);
+  border-radius: 2px;
+}
+
+.rows .row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 12px 14px minmax(0, 1fr) auto 44px 30px;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  height: 20px;
+  padding: 0 6px 0 5px;
+  border-radius: 3px;
+  background: var(--surface);
+  box-shadow: inset 2px 0 0 var(--class-color);
+  cursor: pointer;
+  outline: none;
+  overflow: hidden;
+}
+
+.rows .row > * {
+  position: relative;
+  z-index: 1;
+}
+
+.rows .bar-fill {
+  position: absolute;
+  z-index: 0;
+  inset: 0 auto 0 0;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--class-color) 55%, transparent),
+    color-mix(in srgb, var(--class-color) 30%, transparent)
+  );
+  transition: width 0.55s ease;
+}
+
+.rows .row:hover,
+.rows .row:focus-visible {
+  background: var(--surface-hi);
+}
+
+.row-self .name {
+  color: #fff;
+}
+
+.rank {
+  color: var(--faint);
+  font: 10px var(--mono);
+  text-align: right;
+}
+
+.name {
+  font-weight: 600;
+}
+
+.rows .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rows .class-emblem {
+  width: 14px;
+  height: 14px;
+}
+
+.you {
+  margin-left: 4px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: #2b4a7acc;
+  color: #bcd8ff;
+  font-size: 8px;
+  letter-spacing: 0.05em;
+  vertical-align: 1px;
+  text-shadow: none;
+}
+
+.rate,
+.total,
+.share {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.rate {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.metric-healing .rate {
+  color: #8af0b4;
+}
+
+.metric-taken .rate {
+  color: #a9c4ff;
+}
+
+.total {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.share {
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.empty {
+  color: var(--dim);
+  font-size: 11px;
+  text-align: center;
+  padding: 10px 0 8px;
+}
+
+/* ---------- Comunes ---------- */
+
+.cls {
+  flex: none;
+  color: var(--dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.class-emblem {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  object-fit: contain;
+  opacity: 0.95;
+  filter: drop-shadow(0 1px 1px #000a);
+}
+
+.error {
+  background: rgb(120 20 40 / 0.55);
+  color: #ffb3b3;
+  padding: 4px 8px;
+  font-size: 11px;
 }
 
 .badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.08em;
 }
 
 .badge .dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: #555f73;
 }
 
 .badge-live {
-  color: #3ddc84;
+  color: var(--green);
 }
 
 .badge-live .dot {
-  background: #3ddc84;
-  box-shadow: 0 0 6px #3ddc8488;
+  background: var(--green);
 }
 
 .badge-listening {
@@ -170,24 +612,19 @@ header {
 
 .port {
   color: var(--dim);
-  font: 11px var(--mono);
+  font: 10px var(--mono);
 }
 
 /* Panel de diagnóstico de desarrollo. Solo se pinta en compilaciones sin el
    tag "production"; en la app distribuida no existe. */
 .dev-panel {
-  background: var(--panel);
-  border-bottom: 1px solid var(--line);
-  font: 11px var(--mono);
+  font: 10px var(--mono);
 }
 
 .dev-panel summary {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  color: var(--dim);
-  font-size: 10px;
+  padding: 1px 8px;
+  color: var(--faint);
+  font-size: 9px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   cursor: pointer;
@@ -199,23 +636,18 @@ header {
 }
 
 .dev-panel summary::before {
-  content: '▸';
-  font-size: 9px;
+  content: '▸ ';
 }
 
 .dev-panel[open] summary::before {
-  content: '▾';
-}
-
-.dev-panel summary:hover {
-  color: var(--text);
+  content: '▾ ';
 }
 
 .dev-body {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 0 12px 9px;
+  gap: 4px;
+  padding: 0 8px 6px;
   max-height: 40vh;
   overflow-y: auto;
 }
@@ -224,243 +656,41 @@ header {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 
 .dev-path {
   flex: 1 1 100%;
   min-width: 0;
   color: var(--dim);
-  font: 10px var(--mono);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.dev-body .log {
-  margin-top: 0;
-}
-
-.btn {
-  border: 1px solid var(--line);
-  background: #1d2536;
-  color: var(--text);
-  border-radius: 6px;
-  padding: 4px 14px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.btn:hover:not(:disabled) {
-  background: #253048;
-}
-
-.btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.error {
-  background: #3a1620;
-  color: #ff9b9b;
-  padding: 7px 12px;
-  font-size: 12px;
-  border-bottom: 1px solid #4a1d2a;
-}
-
-.fight-bar {
+.stats {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
   flex-wrap: wrap;
-  gap: 6px 12px;
-  flex: none;
-  padding: 8px 12px 9px;
-  border-bottom: 1px solid #1a2231;
-}
-
-.fight-boss {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text);
-  font-size: 11px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.history-picker {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  flex: 0 1 auto;
-}
-
-.history-label {
+  gap: 4px 10px;
   color: var(--dim);
-  font: 9px var(--mono);
-  letter-spacing: 0.08em;
-}
-
-.history-select {
-  min-width: 0;
-  max-width: 170px;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  background: #171f2d;
-  color: var(--text);
   font: 10px var(--mono);
-  padding: 2px 4px;
-  cursor: pointer;
 }
 
-.history-select:hover {
-  border-color: #3a4863;
-}
-
-.history-select:focus-visible {
-  outline: 1px solid #4c5a75;
-  outline-offset: -1px;
-}
-
-.tabs {
-  display: flex;
-  flex: none;
-  gap: 3px;
-  padding: 6px 12px 0;
-  background: var(--bg);
-  border-bottom: 1px solid #1a2231;
-}
-
-.tab {
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: 6px 6px 0 0;
-  background: transparent;
-  color: var(--dim);
-  padding: 5px 11px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  cursor: pointer;
-}
-
-.tab:hover {
-  background: #171f2d;
-  color: var(--text);
-}
-
-.tab-active {
-  background: var(--panel);
-  border-color: var(--line);
-  color: var(--text);
-}
-
-.tab:focus-visible {
-  outline: 1px solid #4c5a75;
-  outline-offset: -1px;
-}
-
-.metric-healing .dps {
-  color: #6ee7a0;
-}
-
-.metric-taken .dps {
-  color: #8fb3ff;
-}
-
-.skill-source {
-  color: #8fb3ff;
-}
-
-.fight-kind {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 3px 10px 3px 8px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: #171f2d;
-  color: var(--dim);
+.log {
+  color: var(--faint);
   font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  line-height: 1.4;
-  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.fight-kind-boss {
-  color: #ff9b9b;
-  background: #2a141a;
-  border-color: #4a1d2a;
-}
-
-.fight-kind-fight {
-  color: #6ee7a0;
-  background: #14321f;
-  border-color: #1d5133;
-}
-
-.fight-kind-idle {
-  color: var(--dim);
-}
-
-.fight-icon {
-  width: 13px;
-  height: 13px;
-  flex: none;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.fight-time {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text);
-  font: 600 21px var(--mono);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.01em;
-}
-
-.fight-bar-ended .fight-kind,
-.fight-bar-ended .fight-time {
-  opacity: 0.55;
-}
-
-.fight-bar-idle .fight-time {
-  color: #667085;
-}
-
-.fight-live-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #3ddc84;
-  box-shadow: 0 0 8px #3ddc84aa;
-  animation: fight-pulse 1.6s ease-in-out infinite;
-}
-
-@keyframes fight-pulse {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-
-  50% {
-    opacity: 0.35;
-    transform: scale(0.75);
-  }
+footer {
+  border-top: 1px solid var(--line);
+  padding: 6px 12px 7px;
 }
 
 .mock {
-  background: #3b2f10;
+  background: rgb(80 60 15 / 0.7);
   color: #f5b942;
   border: 1px solid #584616;
   border-radius: 4px;
@@ -470,7 +700,7 @@ header {
 }
 
 .live-tag {
-  background: #14321f;
+  background: rgb(20 60 35 / 0.7);
   color: #6ee7a0;
   border: 1px solid #1d5133;
   border-radius: 4px;
@@ -479,45 +709,22 @@ header {
   letter-spacing: 0.06em;
 }
 
-.empty {
-  color: var(--dim);
-  font-size: 12px;
-  text-align: center;
-  padding: 24px 0;
-}
-
-.rows {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 6px 12px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
-
-.row.clickable {
-  cursor: pointer;
-  border-radius: 9px;
-  outline: none;
-}
+/* ---------- Ventana de desglose por habilidad ---------- */
 
 .bar {
   position: relative;
   height: 38px;
-  border: 1px solid #202a3c;
-  border-radius: 9px;
-  background: #171f2d;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
   overflow: hidden;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .bar-fill {
   position: absolute;
   inset: 0 auto 0 0;
-  border-radius: 8px 0 0 8px;
-  opacity: 0.34;
-  transition: width 0.55s ease, opacity 0.15s ease;
+  opacity: 0.38;
+  transition: width 0.55s ease;
 }
 
 .bar-content {
@@ -530,120 +737,10 @@ header {
   padding: 0 11px;
 }
 
-.row.clickable:hover .bar,
-.row.clickable:focus-visible .bar {
-  border-color: #3a4863;
-  box-shadow: inset 0 0 0 1px #ffffff0d;
-}
-
-.row.clickable:hover .bar-fill,
-.row.clickable:focus-visible .bar-fill {
-  opacity: 0.46;
-}
-
-.rank {
-  width: 14px;
-  flex: none;
-  color: var(--dim);
-  font-size: 11px;
-  text-align: right;
-}
-
-.name {
-  font-weight: 600;
-}
-
-.bar-content .name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.bar-content .class-emblem {
-  width: 20px;
-  height: 20px;
-}
-
-.you {
-  background: #2b4a7a;
-  color: #bcd8ff;
-  font-size: 9px;
-  padding: 0 4px;
-  border-radius: 3px;
-  letter-spacing: 0.05em;
-}
-
-.cls {
-  flex: none;
-  color: var(--dim);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.class-emblem {
-  width: 18px;
-  height: 18px;
-  flex: none;
-  object-fit: contain;
-  opacity: 0.9;
-  filter: drop-shadow(0 1px 1px #0008);
-}
-
-.detail-emblem {
-  width: 22px;
-  height: 22px;
-}
-
-.dps {
-  margin-left: auto;
-  flex: none;
-  font: 600 13px var(--mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.dps small {
-  color: var(--dim);
-  font-size: 10px;
-  font-weight: 400;
-}
-
-.dmg {
-  width: 58px;
-  flex: none;
-  text-align: right;
-  color: var(--dim);
-  font: 12px var(--mono);
-  font-variant-numeric: tabular-nums;
-}
-
-footer {
-  border-top: 1px solid var(--line);
-  background: var(--panel);
-  padding: 7px 12px 8px;
-}
-
-.stats {
-  display: flex;
-  gap: 12px;
-  color: var(--dim);
-  font: 11px var(--mono);
-}
-
-.log {
-  margin-top: 4px;
-  color: #667085;
-  font-size: 11px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Ventana de desglose por habilidad. */
-
 .detail-head {
   display: block;
-  padding: 12px 14px 10px;
+  padding: 10px 14px 10px;
+  border-bottom: 1px solid var(--line);
 }
 
 .detail-title {
@@ -661,6 +758,11 @@ footer {
   margin-left: auto;
 }
 
+.detail-emblem {
+  width: 22px;
+  height: 22px;
+}
+
 .detail-stats {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -671,7 +773,7 @@ footer {
 .detail-stat {
   min-width: 0;
   padding: 5px 7px;
-  background: #111827;
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 6px;
 }
@@ -700,8 +802,7 @@ footer {
 
 .detail-banner {
   padding: 6px 12px;
-  background: #3b2f10;
-  border-bottom: 1px solid #584616;
+  background: rgb(80 60 15 / 0.6);
   color: #f5b942;
   font-size: 11px;
 }
@@ -715,7 +816,7 @@ footer {
 
 .skill-row {
   padding: 6px 0;
-  border-bottom: 1px solid #1c2434;
+  border-bottom: 1px solid var(--line);
 }
 
 .skill-row:last-child {
@@ -723,7 +824,7 @@ footer {
 }
 
 .skill-bar {
-  height: 34px;
+  height: 32px;
 }
 
 .skill-content {
@@ -749,7 +850,7 @@ footer {
   width: 20px;
   height: 20px;
   border-radius: 4px;
-  background: #1a2130;
+  background: var(--surface-hi);
   border: 1px solid var(--line);
 }
 
@@ -783,4 +884,8 @@ footer {
   gap: 4px 12px;
   color: var(--dim);
   font: 11px var(--mono);
+}
+
+.skill-source {
+  color: #8fb3ff;
 }

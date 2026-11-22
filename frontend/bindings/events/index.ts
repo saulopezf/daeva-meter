@@ -28,3 +28,8 @@ export const CombatHistory = "combat:history";
  */
 export const CombatUpdate = "combat:update";
 
+/**
+ * Name of the custom event "ui:clickthrough".
+ */
+export const UiClickthrough = "ui:clickthrough";
+

@@ -1,32 +1,44 @@
+import type { ReactNode } from 'react';
 import { Window } from '@wailsio/runtime';
 
 interface TitleBarProps {
   label?: string;
+  // Contenido central (p. ej. la información del combate). Si no se indica se
+  // muestra la marca de la app.
+  children?: ReactNode;
+  // Botones que se colocan antes de la cruz de cerrar.
+  actions?: ReactNode;
 }
 
-// TitleBar sustituye a la barra de título nativa de Windows: se integra con el
-// fondo de la app y solo muestra una cruz para cerrar. Toda la barra (excepto la
-// cruz) sirve para arrastrar la ventana frameless.
-export function TitleBar({ label = 'daeva-meter' }: TitleBarProps) {
+// TitleBar sustituye a la barra de título nativa de Windows. Toda la barra
+// (excepto los botones) sirve para arrastrar la ventana frameless.
+export function TitleBar({ label = 'daeva-meter', children, actions }: TitleBarProps) {
   return (
     <div className="titlebar">
-      <span className="titlebar-brand">
-        <i className="brand-dot" />
-        {label}
-      </span>
-      <button
-        type="button"
-        className="titlebar-close"
-        onClick={() => {
-          void Window.Close();
-        }}
-        aria-label="Close window"
-        title="Close"
-      >
-        <svg width="11" height="11" viewBox="0 0 11 11" aria-hidden="true">
-          <path d="M1 1l9 9M10 1L1 10" />
-        </svg>
-      </button>
+      <div className="titlebar-main">
+        {children ?? (
+          <span className="titlebar-brand">
+            <i className="brand-dot" />
+            {label}
+          </span>
+        )}
+      </div>
+      <div className="titlebar-actions">
+        {actions}
+        <button
+          type="button"
+          className="icon-btn titlebar-close"
+          onClick={() => {
+            void Window.Close();
+          }}
+          aria-label="Close window"
+          title="Close"
+        >
+          <svg viewBox="0 0 12 12" aria-hidden="true">
+            <path d="M2.5 2.5l7 7M9.5 2.5l-7 7" />
+          </svg>
+        </button>
+      </div>
     </div>
   );
 }

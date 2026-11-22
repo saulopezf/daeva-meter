@@ -61,6 +61,14 @@ type App struct {
 	logPath   string
 	logCh     chan struct{}
 	capStart  time.Time
+
+	// mainWindow es la ventana overlay. clickThrough indica si ignora el ratón
+	// para que los clics lleguen al juego; trayToggle es el checkbox del menú de
+	// bandeja que refleja ese estado. hotkeyStop detiene el sondeo del atajo.
+	mainWindow   *application.WebviewWindow
+	clickThrough atomic.Bool
+	trayToggle   *application.MenuItem
+	hotkeyStop   chan struct{}
 }
 
 // NewApp crea la estructura de la aplicación que se enlaza con el frontend.
@@ -84,15 +92,45 @@ func (a *App) ServiceStartup(_ context.Context, _ application.ServiceOptions) er
 	if err := a.StartCapture(); err != nil {
 		log.Printf("[app] capture auto-start failed: %v", err)
 	}
+	a.hotkeyStop = make(chan struct{})
+	go watchClickThroughHotkey(a.hotkeyStop, a.ToggleClickThrough)
 	return nil
 }
 
 // ServiceShutdown se ejecuta al cerrar la aplicación: detiene la captura y
 // cierra el log de sesión.
 func (a *App) ServiceShutdown() error {
+	if a.hotkeyStop != nil {
+		close(a.hotkeyStop)
+		a.hotkeyStop = nil
+	}
 	a.StopCapture()
 	a.closeSessionLog()
 	return nil
+}
+
+// ClickThrough indica si la ventana principal deja pasar los clics al juego.
+func (a *App) ClickThrough() bool {
+	return a.clickThrough.Load()
+}
+
+// SetClickThrough activa o desactiva el modo click-through de la ventana
+// principal: con él activo la ventana ignora el ratón y los clics llegan al
+// juego. Se desactiva con el atajo global Ctrl+Alt+M o desde la bandeja.
+func (a *App) SetClickThrough(on bool) {
+	a.clickThrough.Store(on)
+	if a.mainWindow != nil {
+		a.mainWindow.SetIgnoreMouseEvents(on)
+	}
+	if a.trayToggle != nil {
+		a.trayToggle.SetChecked(on)
+	}
+	a.emit("ui:clickthrough", on)
+}
+
+// ToggleClickThrough alterna el modo click-through.
+func (a *App) ToggleClickThrough() {
+	a.SetClickThrough(!a.clickThrough.Load())
 }
 
 // StartCapture arranca la captura pasiva de paquetes. No hace nada si ya está en
@@ -252,7 +290,8 @@ func (a *App) OpenMemberWindow(encounterID int, key, name, metric string) {
 		MinWidth:         560,
 		MinHeight:        360,
 		Frameless:        true,
-		BackgroundColour: application.NewRGB(16, 21, 31),
+		BackgroundType:   application.BackgroundTypeTransparent,
+		BackgroundColour: application.NewRGBA(0, 0, 0, 0),
 		URL:              target,
 	}
 	// La ventana principal es topmost, así que los detalles se abren a su lado

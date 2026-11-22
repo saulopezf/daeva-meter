@@ -4,6 +4,7 @@ import { App as Backend } from '../bindings/daeva-meter';
 import { classEmblem } from './classes';
 import { TitleBar } from './components/TitleBar';
 import { fmtCompact } from './format';
+import { useOpacity } from './useOpacity';
 import type { MemberDetail as MemberDetailData, Metric, SkillStat } from './types';
 
 interface MemberDetailProps {
@@ -62,6 +63,7 @@ export default function MemberDetail({
   encounterID,
   metric,
 }: MemberDetailProps) {
+  useOpacity();
   const [detail, setDetail] = useState<MemberDetailData | null>(null);
   const [waiting, setWaiting] = useState(false);
   const [error, setError] = useState('');
